@@ -11,3 +11,8 @@ git clone git@github.com:dadadadawjb/r3kit.git
 cd r3kit
 pip install -e .
 ```
+
+* Franka Robot: `frankx` and `rt-linux`
+* Flexiv Robot: `flexivrdk`
+* Realsense Camera: `pyrealsense2`
+* Flexiv FTSensor: None
