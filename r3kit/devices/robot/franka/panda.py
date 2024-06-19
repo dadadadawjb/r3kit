@@ -5,7 +5,7 @@ import transformations as tf
 try:
     from frankx import Robot, JointMotion, Affine, LinearMotion, ImpedanceMotion
 except ImportError:
-    print("Robot Franka Panda needs `frankx")
+    print("Robot Franka Panda needs `frankx`")
     raise ImportError
 
 from r3kit.devices.robot.base import RobotBase
