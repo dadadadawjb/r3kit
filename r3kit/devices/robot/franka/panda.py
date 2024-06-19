@@ -17,7 +17,7 @@ from r3kit.devices.robot.franka.config import *
 class Panda(RobotBase):
     DOF:int = 7
 
-    def __init__(self, ip:str=PANDA_IP, gripper:Optional[GripperBase]=None, name:str='') -> None:
+    def __init__(self, ip:str=PANDA_IP, gripper:Optional[GripperBase]=None, name:str='Panda') -> None:
         super().__init__(name)
         
         self.robot = Robot(ip)
@@ -88,10 +88,10 @@ class Panda(RobotBase):
     def start_impedance_control(self, tr_stiffness:float=PANDA_TR_STIFFNESS, rot_stiffness:float=PANDA_ROT_STIFFNESS) -> None:
         self.impedance_motion = ImpedanceMotion(tr_stiffness, rot_stiffness)
         self.robot_thread = self.robot.move_async(self.impedance_motion)
-        time.sleep(0.5)
+        time.sleep(PANDA_IMPEDANCE_WAIT_TIME)
         self.in_impedance_control = True
     
-    def end_impedance_control(self) -> None:
+    def stop_impedance_control(self) -> None:
         self.impedance_motion.finish()
         self.robot_thread.join()
         self.impedance_motion = None
@@ -127,6 +127,6 @@ if __name__ == "__main__":
         time.sleep(0.3)
     pose = robot.tcp_read()
     print("current pose:", pose)
-    robot.end_impedance_control()
+    robot.stop_impedance_control()
     robot.homing()
     print("homing")

@@ -11,7 +11,7 @@ from r3kit.devices.gripper.franka.config import *
 class Panda(GripperBase):
     MAX_WIDTH:float = 0.08
 
-    def __init__(self, ip:str=PANDA_IP, name:str='') -> None:
+    def __init__(self, ip:str=PANDA_IP, name:str='Panda') -> None:
         super().__init__(name)
 
         self.gripper = Gripper(ip)
