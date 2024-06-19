@@ -1,4 +1,3 @@
-from typing import Optional
 import time
 import numpy as np
 import transformations as tf
@@ -10,21 +9,21 @@ except ImportError:
     raise ImportError
 
 from r3kit.devices.robot.base import RobotBase
-from r3kit.devices.gripper.base import GripperBase
 from r3kit.devices.robot.franka.config import *
 
 
 class Panda(RobotBase):
     DOF:int = 7
 
-    def __init__(self, ip:str=PANDA_IP, gripper:Optional[GripperBase]=None, name:str='Panda') -> None:
+    def __init__(self, ip:str=PANDA_IP, name:str='Panda') -> None:
         super().__init__(name)
         
         self.robot = Robot(ip)
         self.robot.set_default_behavior()
         self.robot.recover_from_errors()
         self.robot.set_dynamic_rel(PANDA_DYNAMIC_REL)
-        self.gripper = gripper
+
+        self.t2f = np.array(self.robot.read_once().F_T_EE).reshape(4, 4).T
 
         self.in_impedance_control = False
     
@@ -58,25 +57,28 @@ class Panda(RobotBase):
         else:
             raise NotImplementedError
 
-    def tcp_read(self) -> np.ndarray:
+    def flange_read(self) -> np.ndarray:
         '''
-        tcp: 4x4 transformation matrix tcp2rb
+        f2b: 4x4 transformation matrix from flange to robot base
         '''
         if not self.in_impedance_control:
-            tcp = np.array(self.robot.read_once().O_T_EE).reshape(4, 4).T
+            robot_state = self.robot.read_once()
         else:
             # NOTE: not supported in frankx, need to rebuild
-            tcp = np.array(self.impedance_motion.get_robotstate().O_T_EE).reshape(4, 4).T
-        return tcp
+            robot_state = self.impedance_motion.get_robotstate()
+        t2b = np.array(robot_state.O_T_EE).reshape(4, 4).T
+        f2b = t2b @ np.linalg.inv(self.t2f)
+        return f2b
     
-    def tcp_move(self, tcp:np.ndarray, relative:bool=False) -> None:
+    def flange_move(self, f2b:np.ndarray, relative:bool=False) -> None:
         '''
-        tcp: 4x4 transformation matrix tcp2rb
+        f2b: 4x4 transformation matrix from flange to robot base
         relative: if True, move relative to current pose; if False, move absolutely in robot base frame
         '''
         if not relative:
-            tr = tcp[:3, 3]
-            rot = tf.euler_from_matrix(tcp, axes='rzyx')
+            t2b = f2b @ self.t2f
+            tr = t2b[:3, 3]
+            rot = tf.euler_from_matrix(t2b, axes='rzyx')
             if not self.in_impedance_control:
                 action = LinearMotion(Affine(tr[0], tr[1], tr[2], rot[0], rot[1], rot[2]))
                 self.robot.move(action)
@@ -100,32 +102,32 @@ class Panda(RobotBase):
 
 
 if __name__ == "__main__":
-    robot = Panda(ip='172.16.0.2', name='panda', gripper=None)
+    robot = Panda(ip='172.16.0.2', name='panda')
 
     robot.homing()
     print("homing")
     joint = robot.joint_read()
     print("current joint:", joint)
-    pose = robot.tcp_read()
+    pose = robot.flange_read()
     print("current pose:", pose)
     target_pose = pose.copy()
     target_pose[:3, 3] += np.array([0.05, 0.05, 0.05])
-    robot.tcp_move(target_pose, relative=False)
+    robot.flange_move(target_pose, relative=False)
     print("move")
     joint = robot.joint_read()
     print("current joint:", joint)
-    pose = robot.tcp_read()
+    pose = robot.flange_read()
     print("current pose:", pose)
     robot.start_impedance_control(tr_stiffness=1000.0, rot_stiffness=20.0)
     print("start impedance control")
     for i in range(10):
-        current_pose = robot.tcp_read()
+        current_pose = robot.flange_read()
         print(i, current_pose)
         target_pose = current_pose.copy()
         target_pose[:3, 3] += np.array([0., 0.02, 0.])
-        robot.tcp_move(target_pose, relative=False)
+        robot.flange_move(target_pose, relative=False)
         time.sleep(0.3)
-    pose = robot.tcp_read()
+    pose = robot.flange_read()
     print("current pose:", pose)
     robot.stop_impedance_control()
     robot.homing()
