@@ -3,12 +3,7 @@ import time
 import numpy as np
 import cv2
 from threading import Lock
-
-try:
-    import pyrealsense2 as rs
-except ImportError:
-    print("Camera RealSense T265 needs `pyrealsense2`")
-    raise ImportError
+import pyrealsense2 as rs
 
 from r3kit.devices.camera.base import CameraBase
 from r3kit.devices.camera.realsense.config import *

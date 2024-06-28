@@ -12,10 +12,10 @@ cd r3kit
 pip install -e .
 ```
 
-* Franka Robot: `frankx` and `rt-linux`
+Additional manual dependencies (see `docs` to set up): 
+* Franka Robot: `rt-linux`
 * Flexiv Robot: `flexivrdk`
-* Realsense Camera: `pyrealsense2`
-* Flexiv FTSensor: None
+* VIVE Camera: `SteamVR` and `VIVE_Streaming_Hub`
 
 ## Usage
 ```python

@@ -1,8 +1,4 @@
-try:
-    import pyrealsense2 as rs
-except ImportError:
-    print("Camera RealSense needs `pyrealsense2`")
-    raise ImportError
+import pyrealsense2 as rs
 
 L515_ID = 'f0172289'
 L515_STREAMS = [
