@@ -1,3 +1,4 @@
+import os
 from typing import Tuple, Optional
 import time
 import numpy as np
@@ -7,6 +8,7 @@ import pyrealsense2 as rs
 
 from r3kit.devices.camera.base import CameraBase
 from r3kit.devices.camera.realsense.config import *
+from r3kit.utils.vis import draw_time, save_imgs
 
 
 class T265(CameraBase):
@@ -61,14 +63,38 @@ class T265(CameraBase):
             self.pipeline_profile = self.pipeline.start(self.config, self.callback)
         self.in_streaming = True
 
-    def stop_streaming(self) -> None:
+    def stop_streaming(self) -> Optional[dict]:
+        streaming_data = None
         self.pipeline.stop()
-        self.image_streaming_mutex = None
-        self.image_streaming_data.clear()
-        self.pose_streaming_mutex = None
-        self.pose_streaming_data.clear()
+        if hasattr(self, "image_streaming_mutex"):
+            self.image_streaming_mutex = None
+        if hasattr(self, "image_streaming_data"):
+            streaming_data = {'image': self.image_streaming_data.copy()}
+            self.image_streaming_data.clear()
+        if hasattr(self, "pose_streaming_mutex"):
+            self.pose_streaming_mutex = None
+        if hasattr(self, "pose_streaming_data"):
+            streaming_data['pose'] = self.pose_streaming_data.copy()
+            self.pose_streaming_data.clear()
         self.pipeline_profile = self.pipeline.start(self.config)
         self.in_streaming = False
+        return streaming_data
+    
+    def save_streaming(self, save_path:str, streaming_data:dict) -> None:
+        assert len(streaming_data["image"]["left"]) == len(streaming_data["image"]["right"]) == len(streaming_data["image"]["timestamp_ms"])
+        assert len(streaming_data["pose"]["xyz"]) == len(streaming_data["pose"]["quat"]) == len(streaming_data["pose"]["timestamp_ms"])
+        os.makedirs(os.path.join(save_path, 'image'), exist_ok=True)
+        os.makedirs(os.path.join(save_path, 'pose'), exist_ok=True)
+        np.save(os.path.join(save_path, 'image', "timestamps.npy"), np.array(streaming_data["image"]["timestamp_ms"], dtype=float))
+        freq = len(streaming_data["image"]["timestamp_ms"]) / (streaming_data["image"]["timestamp_ms"][-1] - streaming_data["image"]["timestamp_ms"][0])
+        draw_time(streaming_data["image"]["timestamp_ms"], os.path.join(save_path, 'image', f"freq_{freq}.png"))
+        np.save(os.path.join(save_path, 'pose', "timestamps.npy"), np.array(streaming_data["pose"]["timestamp_ms"], dtype=float))
+        freq = len(streaming_data["pose"]["timestamp_ms"]) / (streaming_data["pose"]["timestamp_ms"][-1] - streaming_data["pose"]["timestamp_ms"][0])
+        draw_time(streaming_data["pose"]["timestamp_ms"], os.path.join(save_path, 'pose', f"freq_{freq}.png"))
+        save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"])
+        save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"])
+        np.save(os.path.join(save_path, 'pose', "xyz.npy"), np.array(streaming_data["pose"]["xyz"], dtype=float))
+        np.save(os.path.join(save_path, 'pose', "quat.npy"), np.array(streaming_data["pose"]["quat"], dtype=float))
     
     def callback(self, frame):
         ts = time.time() * 1000

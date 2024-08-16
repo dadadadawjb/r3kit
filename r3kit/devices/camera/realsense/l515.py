@@ -1,3 +1,4 @@
+import os
 from typing import Tuple, Optional
 import time
 import numpy as np
@@ -8,6 +9,7 @@ import pyrealsense2 as rs
 from r3kit.devices.camera.base import CameraBase
 from r3kit.devices.camera.utils import inpaint
 from r3kit.devices.camera.realsense.config import *
+from r3kit.utils.vis import draw_time, save_imgs
 
 
 class L515(CameraBase):
@@ -79,12 +81,29 @@ class L515(CameraBase):
             self.pipeline_profile = self.pipeline.start(self.config, self.callback)
         self.in_streaming = True
 
-    def stop_streaming(self) -> None:
+    def stop_streaming(self) -> Optional[dict]:
+        streaming_data = None
         self.pipeline.stop()
-        self.streaming_mutex = None
-        self.streaming_data.clear()
+        if hasattr(self, "streaming_mutex"):
+            self.streaming_mutex = None
+        if hasattr(self, "streaming_data"):
+            streaming_data = self.streaming_data.copy()
+            self.streaming_data.clear()
         self.pipeline_profile = self.pipeline.start(self.config)
         self.in_streaming = False
+        return streaming_data
+    
+    def save_streaming(self, save_path:str, streaming_data:dict) -> None:
+        assert len(streaming_data["depth"]) == len(streaming_data["color"]) == len(streaming_data["timestamp_ms"])
+        np.savetxt(os.path.join(save_path, "intrinsics.txt"), self.color_intrinsics, fmt="%.16f")
+        np.savetxt(os.path.join(save_path, "depth_scale.txt"), [self.depth_scale], fmt="%.16f")
+        np.save(os.path.join(save_path, "timestamps.npy"), np.array(streaming_data["timestamp_ms"], dtype=float))
+        freq = len(streaming_data["timestamp_ms"]) / (streaming_data["timestamp_ms"][-1] - streaming_data["timestamp_ms"][0])
+        draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+        os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
+        os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
+        save_imgs(os.path.join(save_path, 'depth'), streaming_data["depth"])
+        save_imgs(os.path.join(save_path, 'color'), streaming_data["color"])
     
     def callback(self, frame):
         ts = time.time() * 1000
