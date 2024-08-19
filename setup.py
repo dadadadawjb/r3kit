@@ -19,9 +19,9 @@ setup(
         'matplotlib', 
         'scipy', 
         'transformations', 
-        'pyrealsense2', # needed by camera realsense
+        'pyrealsense2==2.53.1.4623', # needed by camera realsense
         'pyopenxr', # needed by camera vive ultimate
-        'frankx', # needed by robot franka
+        # 'frankx', # needed by robot franka
     ], 
     zip_safe = False
 )

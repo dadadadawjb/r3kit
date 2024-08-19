@@ -44,7 +44,7 @@ class T265(CameraBase):
                 raise AttributeError
     
     def start_streaming(self, callback:Optional[callable]=None) -> None:
-        self.pipeline.stop()
+        # self.pipeline.stop()
         if callback is not None:
             self.pipeline_profile = self.pipeline.start(self.config, callback)
         else:
@@ -76,7 +76,7 @@ class T265(CameraBase):
         if hasattr(self, "pose_streaming_data"):
             streaming_data['pose'] = self.pose_streaming_data.copy()
             self.pose_streaming_data.clear()
-        self.pipeline_profile = self.pipeline.start(self.config)
+        # self.pipeline_profile = self.pipeline.start(self.config)
         self.in_streaming = False
         return streaming_data
     
@@ -91,6 +91,8 @@ class T265(CameraBase):
         np.save(os.path.join(save_path, 'pose', "timestamps.npy"), np.array(streaming_data["pose"]["timestamp_ms"], dtype=float))
         freq = len(streaming_data["pose"]["timestamp_ms"]) / (streaming_data["pose"]["timestamp_ms"][-1] - streaming_data["pose"]["timestamp_ms"][0])
         draw_time(streaming_data["pose"]["timestamp_ms"], os.path.join(save_path, 'pose', f"freq_{freq}.png"))
+        os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
+        os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
         save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"])
         save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"])
         np.save(os.path.join(save_path, 'pose', "xyz.npy"), np.array(streaming_data["pose"]["xyz"], dtype=float))
