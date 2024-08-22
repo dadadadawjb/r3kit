@@ -69,6 +69,8 @@ class L515(CameraBase):
     
     def start_streaming(self, callback:Optional[callable]=None) -> None:
         self.pipeline.stop()
+        if not hasattr(self, "_collect_streaming_data"):
+            self._collect_streaming_data = True
         if callback is not None:
             self.pipeline_profile = self.pipeline.start(self.config, callback)
         else:
@@ -105,8 +107,15 @@ class L515(CameraBase):
         save_imgs(os.path.join(save_path, 'depth'), streaming_data["depth"])
         save_imgs(os.path.join(save_path, 'color'), streaming_data["color"])
     
+    def collect_streaming(self, collect:bool=True) -> None:
+        # NOTE: only valid for no-custom-callback
+        self._collect_streaming_data = collect
+    
     def callback(self, frame):
         ts = time.time() * 1000
+        if not self._collect_streaming_data:
+            return
+        
         if frame.is_frameset():
             frameset = frame.as_frameset()
             frameset = self.align.process(frameset)
@@ -127,6 +136,23 @@ class L515(CameraBase):
                 self.streaming_data["color"].append(color_image.copy())
                 self.streaming_data["timestamp_ms"].append(ts)
             self.streaming_mutex.release()
+    
+    @staticmethod
+    def img2pc(depth_img:np.ndarray, intrinsics:np.ndarray, color_img:Optional[np.ndarray]=None) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        # depth_img: already scaled by depth_scale
+        # intrinsics: [ppx, ppy, fx, fy]
+        # color_img: already converted to rgb and scaled to [0, 1]
+        height, weight = depth_img.shape
+        [pixX, pixY] = np.meshgrid(np.arange(weight), np.arange(height))
+        x = (pixX - intrinsics[0]) * depth_img / intrinsics[2]
+        y = (pixY - intrinsics[1]) * depth_img / intrinsics[3]
+        z = depth_img
+        xyz = np.stack([x, y, z], axis=-1).reshape(-1, 3)
+        if color_img is None:
+            rgb = None
+        else:
+            rgb = color_img.reshape(-1, 3)
+        return xyz, rgb
 
     def __del__(self) -> None:
         self.pipeline.stop()

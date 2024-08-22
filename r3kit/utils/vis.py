@@ -29,6 +29,24 @@ def vis_pc(xyz:np.ndarray, rgb:Optional[np.ndarray]=None, show_frame:bool=True) 
     o3d.visualization.draw_geometries(geometries)
 
 
+def rotation_vec2mat(vec:np.ndarray) -> np.ndarray:
+    mat = np.zeros((3, 3))
+    temp2 = np.cross(vec, np.array([1., 0., 0.]))
+    if np.linalg.norm(temp2) < 1e-3:
+        temp1 = np.cross(np.array([0., 1., 0.]), vec)
+        temp1 /= np.linalg.norm(temp1)
+        temp2 = np.cross(vec, temp1)
+        temp2 /= np.linalg.norm(temp2)
+    else:
+        temp2 /= np.linalg.norm(temp2)
+        temp1 = np.cross(temp2, vec)
+        temp1 /= np.linalg.norm(temp1)
+    mat[:, 0] = temp1
+    mat[:, 1] = temp2
+    mat[:, 2] = vec
+    return mat
+
+
 def draw_time(timestamps:List[float], path:str) -> None:
     num = len(timestamps) - 1
     x = list(range(num))
@@ -38,6 +56,35 @@ def draw_time(timestamps:List[float], path:str) -> None:
     plt.xlabel('data')
     plt.ylabel('time')
     plt.savefig(path)
+
+def draw_items(items:np.ndarray, path:str) -> None:
+    assert len(items.shape) == 1 or len(items.shape) == 2
+    if len(items.shape) == 1:
+        T = items.shape[0]
+        x = list(range(T))
+        y = items
+        plt.figure()
+        plt.plot(x, y)
+        plt.xlabel('time')
+        plt.ylabel('value')
+        plt.savefig(path)
+    else:
+        plt.figure()
+        T, N = items.shape
+        x = list(range(T))
+        if N <= 3:
+            for i in range(N):
+                plt.subplot(1, N, i+1)
+                plt.plot(x, items[:, i])
+                plt.xlabel('time')
+                plt.ylabel(f'value_{i}')
+        else:
+            for i in range(N):
+                plt.subplot(int(np.ceil(N/3)), 3, i+1)
+                plt.plot(x, items[:, i])
+                plt.xlabel('time')
+                plt.ylabel(f'value_{i}')
+        plt.savefig(path)
 
 
 def save_img(idx:int, path:str, frame_list:List[np.ndarray], suffix:str='png', normalize:bool=False) -> None:

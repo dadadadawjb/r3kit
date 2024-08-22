@@ -3,6 +3,7 @@ from typing import Tuple, Optional
 import time
 import numpy as np
 import cv2
+from scipy.spatial.transform import Rotation as Rot
 from threading import Lock
 import pyrealsense2 as rs
 
@@ -45,6 +46,8 @@ class T265(CameraBase):
     
     def start_streaming(self, callback:Optional[callable]=None) -> None:
         # self.pipeline.stop()
+        if not hasattr(self, "_collect_streaming_data"):
+            self._collect_streaming_data = True
         if callback is not None:
             self.pipeline_profile = self.pipeline.start(self.config, callback)
         else:
@@ -98,8 +101,15 @@ class T265(CameraBase):
         np.save(os.path.join(save_path, 'pose', "xyz.npy"), np.array(streaming_data["pose"]["xyz"], dtype=float))
         np.save(os.path.join(save_path, 'pose', "quat.npy"), np.array(streaming_data["pose"]["quat"], dtype=float))
     
+    def collect_streaming(self, collect:bool=True) -> None:
+        # NOTE: only valid for no-custom-callback
+        self._collect_streaming_data = collect
+    
     def callback(self, frame):
         ts = time.time() * 1000
+        if not self._collect_streaming_data:
+            return
+        
         if frame.is_frameset():
             frameset = frame.as_frameset()
             f1 = frameset.get_fisheye_frame(1).as_video_frame()
@@ -130,6 +140,13 @@ class T265(CameraBase):
                 self.pose_streaming_data["quat"].append(quat)
                 self.pose_streaming_data["timestamp_ms"].append(ts)
             self.pose_streaming_mutex.release()
+    
+    @staticmethod
+    def raw2pose(xyz:np.ndarray, quat:np.ndarray) -> np.ndarray:
+        pose_4x4 = np.eye(4)
+        pose_4x4[:3, :3] = Rot.from_quat(quat).as_matrix()
+        pose_4x4[:3, 3] = xyz
+        return pose_4x4
 
     def __del__(self) -> None:
         self.pipeline.stop()

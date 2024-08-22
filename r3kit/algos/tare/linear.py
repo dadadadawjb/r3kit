@@ -125,12 +125,12 @@ if __name__ == '__main__':
     ftarer.set_m(result['m'])
     for i in range(len(f)):
         ftarer.add_data(f[i], pose[i])
-    result = ftarer.run()
+    result.update(ftarer.run())
     print(result)
 
     ctarer = LinearCTTarer()
     ctarer.set_m(result['m'])
     for i in range(len(t)):
         ctarer.add_data(t[i], pose[i])
-    result = ctarer.run()
+    result.update(ctarer.run())
     print(result)
