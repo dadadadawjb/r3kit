@@ -21,6 +21,7 @@ setup(
         'transformations', 
         'pyrealsense2==2.53.1.4623', # needed by camera realsense
         'pyopenxr', # needed by camera vive ultimate
+        'pyserial', # needed by encoder pdcd angle
         # 'frankx', # needed by robot franka
     ], 
     zip_safe = False
