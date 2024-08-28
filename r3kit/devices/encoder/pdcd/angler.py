@@ -142,7 +142,7 @@ class Angler(EncoderBase):
         self.in_streaming.clear()
         self.thread.join()
         self.streaming_mutex = None
-        streaming_data = self.streaming_data.copy()
+        streaming_data = deepcopy(self.streaming_data)
         self.streaming_data.clear()
         return streaming_data
     
@@ -174,6 +174,23 @@ class Angler(EncoderBase):
                     self.streaming_mutex.release()
                 else:
                     callback(deepcopy(data))
+    
+    @staticmethod
+    def raw2angle(raw:np.ndarray) -> np.ndarray:
+        result = []
+        assert len(raw) > 100
+        if np.any(raw[:10] < 1) and np.any(raw[:10] > 359):
+            initial_angle = raw[0]
+        else:
+            assert np.quantile(raw[:10], 0.75) - np.quantile(raw[:10], 0.25) < 1
+            initial_angle = np.median(raw[:10])
+        count = 0
+        result.append(raw[0] - initial_angle + 360 * count)
+        for i in range(1, len(raw)):
+            if abs(raw[i] - raw[i-1]) > 100:
+                count +=  1 if raw[i] - raw[i-1] < 0 else -1
+            result.append(raw[i] - initial_angle + 360 * count)
+        return np.array(result)
 
 
 if __name__ == "__main__":

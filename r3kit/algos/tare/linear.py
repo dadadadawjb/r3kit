@@ -97,7 +97,7 @@ class LinearCTTarer(LinearTarer):
         X = super().run()
         return {
             'c': X[0:3], 
-            't0': X[3]
+            't0': X[3:]
         }
 
 

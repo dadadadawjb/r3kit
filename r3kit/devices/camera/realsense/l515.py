@@ -3,6 +3,7 @@ from typing import Tuple, Optional
 import time
 import numpy as np
 import cv2
+from copy import deepcopy
 from threading import Lock
 import pyrealsense2 as rs
 
@@ -89,7 +90,7 @@ class L515(CameraBase):
         if hasattr(self, "streaming_mutex"):
             self.streaming_mutex = None
         if hasattr(self, "streaming_data"):
-            streaming_data = self.streaming_data.copy()
+            streaming_data = deepcopy(self.streaming_data)
             self.streaming_data.clear()
         self.pipeline_profile = self.pipeline.start(self.config)
         self.in_streaming = False

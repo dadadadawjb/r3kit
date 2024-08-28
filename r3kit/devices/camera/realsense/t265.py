@@ -4,6 +4,7 @@ import time
 import numpy as np
 import cv2
 from scipy.spatial.transform import Rotation as Rot
+from copy import deepcopy
 from threading import Lock
 import pyrealsense2 as rs
 
@@ -72,12 +73,12 @@ class T265(CameraBase):
         if hasattr(self, "image_streaming_mutex"):
             self.image_streaming_mutex = None
         if hasattr(self, "image_streaming_data"):
-            streaming_data = {'image': self.image_streaming_data.copy()}
+            streaming_data = {'image': deepcopy(self.image_streaming_data)}
             self.image_streaming_data.clear()
         if hasattr(self, "pose_streaming_mutex"):
             self.pose_streaming_mutex = None
         if hasattr(self, "pose_streaming_data"):
-            streaming_data['pose'] = self.pose_streaming_data.copy()
+            streaming_data['pose'] = deepcopy(self.pose_streaming_data)
             self.pose_streaming_data.clear()
         # self.pipeline_profile = self.pipeline.start(self.config)
         self.in_streaming = False
