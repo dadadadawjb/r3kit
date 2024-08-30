@@ -4,7 +4,6 @@ import time
 import numpy as np
 import cv2
 from scipy.spatial.transform import Rotation as Rot
-from copy import deepcopy
 from threading import Lock
 import pyrealsense2 as rs
 
@@ -14,8 +13,9 @@ from r3kit.utils.vis import draw_time, save_imgs
 
 
 class T265(CameraBase):
-    def __init__(self, id:Optional[str]=T265_ID, name:str='T265') -> None:
+    def __init__(self, id:Optional[str]=T265_ID, image:bool=True, name:str='T265') -> None:
         super().__init__(name=name)
+        self._image = image
 
         self.pipeline = rs.pipeline()
         self.config = rs.config()
@@ -24,19 +24,33 @@ class T265(CameraBase):
         else:
             pass
         for stream_item in T265_STREAMS:
+            if not image and stream_item[0] == rs.stream.fisheye:
+                continue
             self.config.enable_stream(*stream_item)
         
+        # NOTE: hard code to balance pose accuracy and smoothness
+        self.pipeline.start(self.config)
+        pose_sensor = self.pipeline.get_active_profile().get_device().first_pose_sensor()
+        self.pipeline.stop()
+        # pose_sensor.set_option(rs.option.enable_mapping, 0)
+        pose_sensor.set_option(rs.option.enable_pose_jumping, 0)
+        # pose_sensor.set_option(rs.option.enable_relocalization, 0)
+
         self.in_streaming = False
 
-    def get(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def get(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], np.ndarray, np.ndarray]:
         if not self.in_streaming:
             raise NotImplementedError
         else:
             if hasattr(self, "image_streaming_data"):
                 self.image_streaming_mutex.acquire()
                 self.pose_streaming_mutex.acquire()
-                left_image = self.image_streaming_data["left"][-1]
-                right_image = self.image_streaming_data["right"][-1]
+                if self._image:
+                    left_image = self.image_streaming_data["left"][-1]
+                    right_image = self.image_streaming_data["right"][-1]
+                else:
+                    left_image = None
+                    right_image = None
                 xyz = self.pose_streaming_data["xyz"][-1]
                 quat = self.pose_streaming_data["quat"][-1]
                 self.pose_streaming_mutex.release()
@@ -73,13 +87,21 @@ class T265(CameraBase):
         if hasattr(self, "image_streaming_mutex"):
             self.image_streaming_mutex = None
         if hasattr(self, "image_streaming_data"):
-            streaming_data = {'image': deepcopy(self.image_streaming_data)}
-            self.image_streaming_data.clear()
+            streaming_data = {'image': self.image_streaming_data}
+            self.image_streaming_data = {
+                "left": [], 
+                "right": [], 
+                "timestamp_ms": [], 
+            }
         if hasattr(self, "pose_streaming_mutex"):
             self.pose_streaming_mutex = None
         if hasattr(self, "pose_streaming_data"):
-            streaming_data['pose'] = deepcopy(self.pose_streaming_data)
-            self.pose_streaming_data.clear()
+            streaming_data['pose'] = self.pose_streaming_data
+            self.pose_streaming_data = {
+                "xyz": [], 
+                "quat": [], 
+                "timestamp_ms": [], 
+            }
         # self.pipeline_profile = self.pipeline.start(self.config)
         self.in_streaming = False
         return streaming_data
@@ -87,18 +109,19 @@ class T265(CameraBase):
     def save_streaming(self, save_path:str, streaming_data:dict) -> None:
         assert len(streaming_data["image"]["left"]) == len(streaming_data["image"]["right"]) == len(streaming_data["image"]["timestamp_ms"])
         assert len(streaming_data["pose"]["xyz"]) == len(streaming_data["pose"]["quat"]) == len(streaming_data["pose"]["timestamp_ms"])
-        os.makedirs(os.path.join(save_path, 'image'), exist_ok=True)
+        if self._image:
+            os.makedirs(os.path.join(save_path, 'image'), exist_ok=True)
+            np.save(os.path.join(save_path, 'image', "timestamps.npy"), np.array(streaming_data["image"]["timestamp_ms"], dtype=float))
+            freq = len(streaming_data["image"]["timestamp_ms"]) / (streaming_data["image"]["timestamp_ms"][-1] - streaming_data["image"]["timestamp_ms"][0])
+            draw_time(streaming_data["image"]["timestamp_ms"], os.path.join(save_path, 'image', f"freq_{freq}.png"))
+            os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
+            os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
+            save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"])
+            save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"])
         os.makedirs(os.path.join(save_path, 'pose'), exist_ok=True)
-        np.save(os.path.join(save_path, 'image', "timestamps.npy"), np.array(streaming_data["image"]["timestamp_ms"], dtype=float))
-        freq = len(streaming_data["image"]["timestamp_ms"]) / (streaming_data["image"]["timestamp_ms"][-1] - streaming_data["image"]["timestamp_ms"][0])
-        draw_time(streaming_data["image"]["timestamp_ms"], os.path.join(save_path, 'image', f"freq_{freq}.png"))
         np.save(os.path.join(save_path, 'pose', "timestamps.npy"), np.array(streaming_data["pose"]["timestamp_ms"], dtype=float))
         freq = len(streaming_data["pose"]["timestamp_ms"]) / (streaming_data["pose"]["timestamp_ms"][-1] - streaming_data["pose"]["timestamp_ms"][0])
         draw_time(streaming_data["pose"]["timestamp_ms"], os.path.join(save_path, 'pose', f"freq_{freq}.png"))
-        os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
-        os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
-        save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"])
-        save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"])
         np.save(os.path.join(save_path, 'pose', "xyz.npy"), np.array(streaming_data["pose"]["xyz"], dtype=float))
         np.save(os.path.join(save_path, 'pose', "quat.npy"), np.array(streaming_data["pose"]["quat"], dtype=float))
     
@@ -111,7 +134,7 @@ class T265(CameraBase):
         if not self._collect_streaming_data:
             return
         
-        if frame.is_frameset():
+        if frame.is_frameset() and self._image:
             frameset = frame.as_frameset()
             f1 = frameset.get_fisheye_frame(1).as_video_frame()
             f2 = frameset.get_fisheye_frame(2).as_video_frame()
@@ -154,7 +177,7 @@ class T265(CameraBase):
 
 
 if __name__ == "__main__":
-    camera = T265(id='230222110234', name='T265')
+    camera = T265(id='230222110234', image=True, name='T265')
     
     camera.start_streaming(callback=None)
 
