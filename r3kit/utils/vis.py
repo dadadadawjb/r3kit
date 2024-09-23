@@ -109,3 +109,11 @@ def save_imgs(path:str, frame_list:List[np.ndarray], suffix:str='png', normalize
 
         for future in concurrent.futures.as_completed(futures):
             pass
+
+def save_video(path:str, frame_list:List[np.ndarray], fps:int=30) -> None:
+    height, width, _ = frame_list[0].shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(path, fourcc, fps, (width, height))
+    for frame in frame_list:
+        out.write(frame)
+    out.release()
