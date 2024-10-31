@@ -5,6 +5,8 @@ import numpy as np
 import cv2
 from scipy.spatial.transform import Rotation as Rot
 from threading import Lock
+from multiprocessing import shared_memory, Manager
+from functools import partial
 import pyrealsense2 as rs
 
 from r3kit.devices.camera.base import CameraBase
@@ -35,74 +37,171 @@ class T265(CameraBase):
         # pose_sensor.set_option(rs.option.enable_mapping, 0)
         pose_sensor.set_option(rs.option.enable_pose_jumping, 0)
         # pose_sensor.set_option(rs.option.enable_relocalization, 0)
+        self.pipeline.start(self.config)
+        frames = self.pipeline.wait_for_frames()
+        if self._image:
+            f1 = frames.get_fisheye_frame(1).as_video_frame()
+            f2 = frames.get_fisheye_frame(2).as_video_frame()
+            left_image = np.asanyarray(f1.get_data(), dtype=np.uint8)
+            right_image = np.asanyarray(f2.get_data(), dtype=np.uint8)
+            self.left_image_dtype = left_image.dtype
+            self.left_image_shape = left_image.shape
+            self.right_image_dtype = right_image.dtype
+            self.right_image_shape = right_image.shape
+        pose_frame = frames.get_pose_frame()
+        pose_data_ = pose_frame.get_pose_data()
+        xyz = np.array([pose_data_.translation.x, pose_data_.translation.y, pose_data_.translation.z], dtype=np.float64)
+        quat = np.array([pose_data_.rotation.x, pose_data_.rotation.y, pose_data_.rotation.z, pose_data_.rotation.w], dtype=np.float64)
+        self.xyz_dtype = xyz.dtype
+        self.xyz_shape = xyz.shape
+        self.quat_dtype = quat.dtype
+        self.quat_shape = quat.shape
 
         self.in_streaming = False
 
     def get(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], np.ndarray, np.ndarray]:
         if not self.in_streaming:
-            raise NotImplementedError
+            frames = self.pipeline.wait_for_frames()
+            if self._image:
+                f1 = frames.get_fisheye_frame(1).as_video_frame()
+                f2 = frames.get_fisheye_frame(2).as_video_frame()
+                left_image = np.asanyarray(f1.get_data(), dtype=np.uint8)
+                right_image = np.asanyarray(f2.get_data(), dtype=np.uint8)
+            else:
+                left_image = None
+                right_image = None
+            
+            pose_frame = frames.get_pose_frame()
+            pose_data_ = pose_frame.get_pose_data()
+            xyz = np.array([pose_data_.translation.x, pose_data_.translation.y, pose_data_.translation.z], dtype=np.float64)
+            quat = np.array([pose_data_.rotation.x, pose_data_.rotation.y, pose_data_.rotation.z, pose_data_.rotation.w], dtype=np.float64)
+            return (left_image, right_image, xyz, quat)
         else:
-            if hasattr(self, "image_streaming_data"):
-                self.image_streaming_mutex.acquire()
-                self.pose_streaming_mutex.acquire()
+            if hasattr(self, "pose_streaming_data"):
                 if self._image:
+                    self.image_streaming_mutex.acquire()
                     left_image = self.image_streaming_data["left"][-1]
                     right_image = self.image_streaming_data["right"][-1]
+                    self.image_streaming_mutex.release()
                 else:
                     left_image = None
                     right_image = None
+                self.pose_streaming_mutex.acquire()
                 xyz = self.pose_streaming_data["xyz"][-1]
                 quat = self.pose_streaming_data["quat"][-1]
                 self.pose_streaming_mutex.release()
-                self.image_streaming_mutex.release()
+                return (left_image, right_image, xyz, quat)
+            elif hasattr(self, "pose_streaming_array"):
+                if self._image:
+                    with self.image_streaming_lock:
+                        left_image = np.copy(self.image_streaming_array["left"])
+                        right_image = np.copy(self.image_streaming_array["right"])
+                else:
+                    left_image = None
+                    right_image = None
+                with self.pose_streaming_lock:
+                    xyz = np.copy(self.pose_streaming_array["xyz"])
+                    quat = np.copy(self.pose_streaming_array["quat"])
                 return (left_image, right_image, xyz, quat)
             else:
                 raise AttributeError
     
-    def start_streaming(self, callback:Optional[callable]=None) -> None:
-        # self.pipeline.stop()
+    def start_streaming(self, shm:Optional[str]=None, callback:Optional[callable]=None) -> None:
+        self.pipeline.stop()
         if not hasattr(self, "_collect_streaming_data"):
             self._collect_streaming_data = True
         if callback is not None:
             self.pipeline_profile = self.pipeline.start(self.config, callback)
         else:
-            self.image_streaming_mutex = Lock()
-            self.image_streaming_data = {
-                "left": [], 
-                "right": [], 
-                "timestamp_ms": [], 
-            }
-            self.pose_streaming_mutex = Lock()
-            self.pose_streaming_data = {
-                "xyz": [], 
-                "quat": [], 
-                "timestamp_ms": [], 
-            }
-            self.pipeline_profile = self.pipeline.start(self.config, self.callback)
+            if shm is None:
+                if self._image:
+                    self.image_streaming_mutex = Lock()
+                    self.image_streaming_data = {
+                        "left": [], 
+                        "right": [], 
+                        "timestamp_ms": [], 
+                    }
+                self.pose_streaming_mutex = Lock()
+                self.pose_streaming_data = {
+                    "xyz": [], 
+                    "quat": [], 
+                    "timestamp_ms": [], 
+                }
+                self.pipeline_profile = self.pipeline.start(self.config, partial(self.callback, shm=False))
+            else:
+                self.streaming_manager = Manager()
+                self.pose_streaming_lock = self.streaming_manager.Lock()
+                xyz_memory_size = np.dtype(self.xyz_dtype).itemsize * np.prod(self.xyz_shape)
+                quat_memory_size = np.dtype(self.quat_dtype).itemsize * np.prod(self.quat_shape)
+                timestamp_memory_size = np.dtype(np.float64).itemsize
+                pose_streaming_memory_size = xyz_memory_size + quat_memory_size + timestamp_memory_size
+                self.pose_streaming_memory = shared_memory.SharedMemory(name=shm+'_pose', create=True, size=pose_streaming_memory_size)
+                self.pose_streaming_array = {
+                    "xyz": np.ndarray(self.xyz_shape, dtype=self.xyz_dtype, buffer=self.pose_streaming_memory.buf[:xyz_memory_size]), 
+                    "quat": np.ndarray(self.quat_shape, dtype=self.quat_dtype, buffer=self.pose_streaming_memory.buf[xyz_memory_size:xyz_memory_size+quat_memory_size]), 
+                    "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.pose_streaming_memory.buf[xyz_memory_size+quat_memory_size:])
+                }
+                if self._image:
+                    self.image_streaming_lock = self.streaming_manager.Lock()
+                    left_memory_size = np.dtype(self.left_image_dtype).itemsize * np.prod(self.left_image_shape)
+                    right_memory_size = np.dtype(self.right_image_dtype).itemsize * np.prod(self.right_image_shape)
+                    image_streaming_memory_size = left_memory_size + right_memory_size + timestamp_memory_size
+                    self.image_streaming_memory = shared_memory.SharedMemory(name=shm+'_image', create=True, size=image_streaming_memory_size)
+                    self.image_streaming_array = {
+                        "left": np.ndarray(self.left_image_shape, dtype=self.left_image_dtype, buffer=self.image_streaming_memory.buf[:left_memory_size]), 
+                        "right": np.ndarray(self.right_image_shape, dtype=self.right_image_dtype, buffer=self.image_streaming_memory.buf[left_memory_size:left_memory_size+right_memory_size]), 
+                        "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.image_streaming_memory.buf[left_memory_size+right_memory_size:])
+                    }
+                self.pipeline_profile = self.pipeline.start(self.config, partial(self.callback, shm=True))
         self.in_streaming = True
 
     def stop_streaming(self) -> Optional[dict]:
         streaming_data = None
         self.pipeline.stop()
-        if hasattr(self, "image_streaming_mutex"):
-            self.image_streaming_mutex = None
-        if hasattr(self, "image_streaming_data"):
-            streaming_data = {'image': self.image_streaming_data}
-            self.image_streaming_data = {
-                "left": [], 
-                "right": [], 
-                "timestamp_ms": [], 
-            }
-        if hasattr(self, "pose_streaming_mutex"):
-            self.pose_streaming_mutex = None
         if hasattr(self, "pose_streaming_data"):
+            if self._image:
+                streaming_data = {'image': self.image_streaming_data}
+                self.image_streaming_data = {
+                    "left": [], 
+                    "right": [], 
+                    "timestamp_ms": [], 
+                }
+                del self.image_streaming_data
+                del self.image_streaming_mutex
             streaming_data['pose'] = self.pose_streaming_data
             self.pose_streaming_data = {
                 "xyz": [], 
                 "quat": [], 
                 "timestamp_ms": [], 
             }
-        # self.pipeline_profile = self.pipeline.start(self.config)
+            del self.pose_streaming_data
+            del self.pose_streaming_mutex
+        elif hasattr(self, "pose_streaming_array"):
+            if self._image:
+                streaming_data = {'image': {
+                    "left": [np.copy(self.image_streaming_array["left"])], 
+                    "right": [np.copy(self.image_streaming_array["right"])], 
+                    "timestamp_ms": [self.image_streaming_array["timestamp_ms"].item()]
+                }}
+                self.image_streaming_memory.close()
+                self.image_streaming_memory.unlink()
+                del self.image_streaming_memory
+                del self.image_streaming_array
+                del self.image_streaming_lock
+            streaming_data['pose'] = {
+                "xyz": [np.copy(self.pose_streaming_array["xyz"])], 
+                "quat": [np.copy(self.pose_streaming_array["quat"])], 
+                "timestamp_ms": [self.pose_streaming_array["timestamp_ms"].item()]
+            }
+            self.pose_streaming_memory.close()
+            self.pose_streaming_memory.unlink()
+            del self.pose_streaming_memory
+            del self.pose_streaming_array
+            del self.pose_streaming_lock
+            del self.streaming_manager
+        else:
+            raise AttributeError
+        self.pipeline_profile = self.pipeline.start(self.config)
         self.in_streaming = False
         return streaming_data
     
@@ -129,7 +228,7 @@ class T265(CameraBase):
         # NOTE: only valid for no-custom-callback
         self._collect_streaming_data = collect
     
-    def callback(self, frame):
+    def callback(self, frame, shm:bool=False):
         ts = time.time() * 1000
         if not self._collect_streaming_data:
             return
@@ -141,29 +240,41 @@ class T265(CameraBase):
             left_data = np.asanyarray(f1.get_data(), dtype=np.uint8)
             right_data = np.asanyarray(f2.get_data(), dtype=np.uint8)
             # ts = frameset.get_timestamp()
-            self.image_streaming_mutex.acquire()
-            if len(self.image_streaming_data["timestamp_ms"]) != 0 and ts == self.image_streaming_data["timestamp_ms"][-1]:
-                pass
+            if not shm:
+                self.image_streaming_mutex.acquire()
+                if len(self.image_streaming_data["timestamp_ms"]) != 0 and ts == self.image_streaming_data["timestamp_ms"][-1]:
+                    pass
+                else:
+                    self.image_streaming_data["left"].append(left_data.copy())
+                    self.image_streaming_data["right"].append(right_data.copy())
+                    self.image_streaming_data["timestamp_ms"].append(ts)
+                self.image_streaming_mutex.release()
             else:
-                self.image_streaming_data["left"].append(left_data.copy())
-                self.image_streaming_data["right"].append(right_data.copy())
-                self.image_streaming_data["timestamp_ms"].append(ts)
-            self.image_streaming_mutex.release()
+                with self.image_streaming_lock:
+                    self.image_streaming_array["left"][:] = left_data[:]
+                    self.image_streaming_array["right"][:] = right_data[:]
+                    self.image_streaming_array["timestamp_ms"][:] = ts
         
         if frame.is_pose_frame():
             pose_frame = frame.as_pose_frame()
             pose_data_ = pose_frame.get_pose_data()
-            quat = np.array([pose_data_.rotation.x, pose_data_.rotation.y, pose_data_.rotation.z, pose_data_.rotation.w])
-            xyz = np.array([pose_data_.translation.x, pose_data_.translation.y, pose_data_.translation.z])
+            xyz = np.array([pose_data_.translation.x, pose_data_.translation.y, pose_data_.translation.z], dtype=np.float64)
+            quat = np.array([pose_data_.rotation.x, pose_data_.rotation.y, pose_data_.rotation.z, pose_data_.rotation.w], dtype=np.float64)
             # ts = pose_frame.timestamp
-            self.pose_streaming_mutex.acquire()
-            if len(self.pose_streaming_data["timestamp_ms"]) != 0 and ts == self.pose_streaming_data["timestamp_ms"][-1]:
-                pass
+            if not shm:
+                self.pose_streaming_mutex.acquire()
+                if len(self.pose_streaming_data["timestamp_ms"]) != 0 and ts == self.pose_streaming_data["timestamp_ms"][-1]:
+                    pass
+                else:
+                    self.pose_streaming_data["xyz"].append(xyz)
+                    self.pose_streaming_data["quat"].append(quat)
+                    self.pose_streaming_data["timestamp_ms"].append(ts)
+                self.pose_streaming_mutex.release()
             else:
-                self.pose_streaming_data["xyz"].append(xyz)
-                self.pose_streaming_data["quat"].append(quat)
-                self.pose_streaming_data["timestamp_ms"].append(ts)
-            self.pose_streaming_mutex.release()
+                with self.pose_streaming_lock:
+                    self.pose_streaming_array["xyz"][:] = xyz[:]
+                    self.pose_streaming_array["quat"][:] = quat[:]
+                    self.pose_streaming_array["timestamp_ms"][:] = ts
     
     @staticmethod
     def raw2pose(xyz:np.ndarray, quat:np.ndarray) -> np.ndarray:
@@ -178,13 +289,54 @@ class T265(CameraBase):
 
 if __name__ == "__main__":
     camera = T265(id='230222110234', image=True, name='T265')
+    streaming = True
+    shm = True
     
-    camera.start_streaming(callback=None)
+    if not streaming:
+        i = 0
+        while True:
+            print(f"{i}th")
+            left, right, xyz, quat = camera.get()
 
-    i = 0
-    while True:
-        print(f"{i}th")
-        left, right, xyz, quat = camera.get()
+            print(f"xyz: {xyz}")
+            print(f"quat: {quat}")
+            cv2.imshow('left', left)
+            cv2.imshow('right', right)
+            while True:
+                if cv2.getWindowProperty('left', cv2.WND_PROP_VISIBLE) <= 0:
+                    break
+                cv2.waitKey(1)
+            while True:
+                if cv2.getWindowProperty('right', cv2.WND_PROP_VISIBLE) <= 0:
+                    break
+                cv2.waitKey(1)
+            cv2.destroyAllWindows()
+            
+            cmd = input("whether save? (y/n): ")
+            if cmd == 'y':
+                cv2.imwrite(f"left_{i}.png", left)
+                cv2.imwrite(f"right_{i}.png", right)
+                np.savetxt(f"xyz_{i}.txt", xyz)
+                np.savetxt(f"quat_{i}.txt", quat)
+                i += 1
+            elif cmd == 'n':
+                cmd = input("whether quit? (y/n): ")
+                if cmd == 'y':
+                    break
+                elif cmd == 'n':
+                    pass
+                else:
+                    raise ValueError
+            else:
+                raise ValueError
+    else:
+        camera.start_streaming(shm='T265' if shm else None)
+
+        cmd = input("quit? (enter): ")
+        streaming_data = camera.stop_streaming()
+        print(len(streaming_data["image"]["timestamp_ms"]), len(streaming_data["pose"]["timestamp_ms"]))
+        left, right = streaming_data["image"]["left"][-1], streaming_data["image"]["right"][-1]
+        xyz, quat = streaming_data["pose"]["xyz"][-1], streaming_data["pose"]["quat"][-1]
 
         print(f"xyz: {xyz}")
         print(f"quat: {quat}")
@@ -199,21 +351,11 @@ if __name__ == "__main__":
                 break
             cv2.waitKey(1)
         cv2.destroyAllWindows()
-        
+
         cmd = input("whether save? (y/n): ")
         if cmd == 'y':
-            cv2.imwrite(f"left_{i}.png", left)
-            cv2.imwrite(f"right_{i}.png", right)
-            np.savetxt(f"xyz_{i}.txt", xyz)
-            np.savetxt(f"quat_{i}.txt", quat)
-            i += 1
+            camera.save_streaming('.', streaming_data)
         elif cmd == 'n':
-            cmd = input("whether quit? (y/n): ")
-            if cmd == 'y':
-                break
-            elif cmd == 'n':
-                pass
-            else:
-                raise ValueError
+            pass
         else:
             raise ValueError

@@ -4,6 +4,7 @@ import struct
 import time
 import numpy as np
 from threading import Thread, Lock, Event
+from multiprocessing import shared_memory, Manager
 from copy import deepcopy
 from functools import partial
 import serial
@@ -74,6 +75,10 @@ class Angler(EncoderBase):
         self.ser.flushInput()
         self.ser.flushOutput()
 
+        # config
+        self.angle_dtype = np.float64
+        self.angle_shape = (1,)
+
         # stream
         self.in_streaming = Event()
     
@@ -107,11 +112,19 @@ class Angler(EncoderBase):
         if not self.in_streaming.is_set():
             data = self._read()
         else:
-            self.streaming_mutex.acquire()
-            data = {}
-            data['angle'] = self.streaming_data['angle'][-1]
-            data['timestamp_ms'] = self.streaming_data['timestamp_ms'][-1]
-            self.streaming_mutex.release()
+            if hasattr(self, "streaming_data"):
+                self.streaming_mutex.acquire()
+                data = {}
+                data['angle'] = self.streaming_data['angle'][-1]
+                data['timestamp_ms'] = self.streaming_data['timestamp_ms'][-1]
+                self.streaming_mutex.release()
+            elif hasattr(self, "streaming_array"):
+                data = {}
+                with self.streaming_lock:
+                    data['angle'] = self.streaming_array["angle"].item()
+                    data['timestamp_ms'] = self.streaming_array["timestamp_ms"].item()
+            else:
+                raise AttributeError
         return data
     
     def get_mean_data(self, n=10, name='angle') -> float:
@@ -126,27 +139,57 @@ class Angler(EncoderBase):
         tare = sum(tare_list) / n
         return tare
     
-    def start_streaming(self, callback:Optional[callable]=None) -> None:
+    def start_streaming(self, shm:Optional[str]=None, callback:Optional[callable]=None) -> None:
         if not hasattr(self, "_collect_streaming_data"):
             self._collect_streaming_data = True
         self.in_streaming.set()
-        self.streaming_mutex = Lock()
-        self.streaming_data = {
-            "angle": [], 
-            "timestamp_ms": []
-        }
-        self.thread = Thread(target=partial(self._streaming_data, callback=callback), daemon=True)
-        self.thread.start()
+        if shm is None:
+            self.streaming_mutex = Lock()
+            self.streaming_data = {
+                "angle": [], 
+                "timestamp_ms": []
+            }
+            self.thread = Thread(target=partial(self._streaming_data, shm=False, callback=callback), daemon=True)
+            self.thread.start()
+        else:
+            self.streaming_manager = Manager()
+            self.streaming_lock = self.streaming_manager.Lock()
+            angle_memory_size = np.dtype(self.angle_dtype).itemsize * np.prod(self.angle_shape)
+            timestamp_memory_size = np.dtype(np.float64).itemsize
+            streaming_memory_size = angle_memory_size + timestamp_memory_size
+            self.streaming_memory = shared_memory.SharedMemory(name=shm, create=True, size=streaming_memory_size)
+            self.streaming_array = {
+                "angle": np.ndarray(self.angle_shape, dtype=self.angle_dtype, buffer=self.streaming_memory.buf[:angle_memory_size]), 
+                "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.streaming_memory.buf[angle_memory_size:])
+            }
+            self.thread = Thread(target=partial(self._streaming_data, shm=True, callback=callback), daemon=True)
+            self.thread.start()
     
     def stop_streaming(self) -> dict:
+        streaming_data = None
         self.in_streaming.clear()
         self.thread.join()
-        self.streaming_mutex = None
-        streaming_data = self.streaming_data
-        self.streaming_data = {
-            "angle": [], 
-            "timestamp_ms": []
-        }
+        if hasattr(self, "streaming_data"):
+            streaming_data = self.streaming_data
+            self.streaming_data = {
+                "angle": [], 
+                "timestamp_ms": []
+            }
+            del self.streaming_data
+            del self.streaming_mutex
+        elif hasattr(self, "streaming_array"):
+            streaming_data = {
+                "angle": [self.streaming_array["angle"].item()], 
+                "timestamp_ms": [self.streaming_array["timestamp_ms"].item()]
+            }
+            self.streaming_memory.close()
+            self.streaming_memory.unlink()
+            del self.streaming_memory
+            del self.streaming_array
+            del self.streaming_manager
+            del self.streaming_lock
+        else:
+            raise AttributeError
         return streaming_data
     
     def save_streaming(self, save_path:str, streaming_data:dict) -> None:
@@ -160,7 +203,7 @@ class Angler(EncoderBase):
     def collect_streaming(self, collect:bool=True) -> None:
         self._collect_streaming_data = collect
     
-    def _streaming_data(self, callback:Optional[callable]=None):
+    def _streaming_data(self, shm:bool=False, callback:Optional[callable]=None):
         while self.in_streaming.is_set():
             # fps
             time.sleep(1/self._fps)
@@ -171,10 +214,15 @@ class Angler(EncoderBase):
             data = self._read()
             if data is not None:
                 if callback is None:
-                    self.streaming_mutex.acquire()
-                    self.streaming_data['angle'].append(data['angle'])
-                    self.streaming_data['timestamp_ms'].append(data['timestamp_ms'])
-                    self.streaming_mutex.release()
+                    if not shm:
+                        self.streaming_mutex.acquire()
+                        self.streaming_data['angle'].append(data['angle'])
+                        self.streaming_data['timestamp_ms'].append(data['timestamp_ms'])
+                        self.streaming_mutex.release()
+                    else:
+                        with self.streaming_lock:
+                            self.streaming_array["angle"][:] = data['angle']
+                            self.streaming_array["timestamp_ms"][:] = data['timestamp_ms']
                 else:
                     callback(deepcopy(data))
     
@@ -197,9 +245,20 @@ class Angler(EncoderBase):
 
 
 if __name__ == "__main__":
-    encoder = Angler(id='/dev/ttyUSB0', index=1, baudrate=115200, fps=30, gap=0.002, name='Angler')
+    encoder = Angler(id='/dev/ttyUSB0', index=2, baudrate=115200, fps=30, gap=0.002, name='Angler')
+    streaming = False
+    shm = False
 
-    while True:
-        data = encoder.get()
-        print(data)
-        time.sleep(0.1)
+    if not streaming:
+        while True:
+            data = encoder.get()
+            print(data)
+            time.sleep(0.1)
+    else:
+        encoder.start_streaming(shm='Angler' if shm else None)
+
+        cmd = input("quit? (enter): ")
+        streaming_data = encoder.stop_streaming()
+        print(len(streaming_data["timestamp_ms"]))
+        angle = streaming_data["angle"][-1]
+        print(angle)

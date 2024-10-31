@@ -14,8 +14,8 @@ from r3kit.devices.camera.realsense.config import *
 from r3kit.utils.vis import draw_time, save_imgs
 
 
-class L515(CameraBase):
-    def __init__(self, id:Optional[str]=L515_ID, name:str='L515') -> None:
+class D415(CameraBase):
+    def __init__(self, id:Optional[str]=D415_ID, name:str='D415') -> None:
         super().__init__(name=name)
 
         self.pipeline = rs.pipeline()
@@ -24,7 +24,7 @@ class L515(CameraBase):
             self.config.enable_device(id)
         else:
             pass
-        for stream_item in L515_STREAMS:
+        for stream_item in D415_STREAMS:
             self.config.enable_stream(*stream_item)
         # NOTE: hard code config
         self.align = rs.align(rs.stream.color)
@@ -215,7 +215,7 @@ class L515(CameraBase):
 if __name__ == "__main__":
     from r3kit.utils.vis import vis_pc
 
-    camera = L515(id='f0172289', name='L515')
+    camera = D415(id='104122063633', name='D415')
     streaming = False
     shm = False
 
@@ -227,7 +227,7 @@ if __name__ == "__main__":
             z = depth * camera.depth_scale
             rgb = cv2.cvtColor(color, cv2.COLOR_BGR2RGB) / 255.0
 
-            xyz, rgb = L515.img2pc(z, camera.color_intrinsics, rgb)
+            xyz, rgb = D415.img2pc(z, camera.color_intrinsics, rgb)
             # valid_mask = xyz[:, 2] <= 1.5
             # xyz = xyz[valid_mask, :]
             # rgb = rgb[valid_mask, :]
@@ -257,7 +257,7 @@ if __name__ == "__main__":
             else:
                 raise ValueError
     else:
-        camera.start_streaming(shm='L515' if shm else None)
+        camera.start_streaming(shm='D415' if shm else None)
 
         cmd = input("quit? (enter): ")
         streaming_data = camera.stop_streaming()
@@ -266,7 +266,7 @@ if __name__ == "__main__":
         z = depth * camera.depth_scale
         rgb = cv2.cvtColor(color, cv2.COLOR_BGR2RGB) / 255.0
 
-        xyz, rgb = L515.img2pc(z, camera.color_intrinsics, rgb)
+        xyz, rgb = D415.img2pc(z, camera.color_intrinsics, rgb)
         # valid_mask = xyz[:, 2] <= 1.5
         # xyz = xyz[valid_mask, :]
         # rgb = rgb[valid_mask, :]
