@@ -1,12 +1,11 @@
 import os
-from typing import Tuple, Optional
+from typing import Tuple, List, Union, Dict, Optional
 import time
 import numpy as np
 import cv2
 from scipy.spatial.transform import Rotation as Rot
 from threading import Lock
 from multiprocessing import shared_memory, Manager
-from functools import partial
 import pyrealsense2 as rs
 
 from r3kit.devices.camera.base import CameraBase
@@ -106,14 +105,17 @@ class T265(CameraBase):
             else:
                 raise AttributeError
     
-    def start_streaming(self, shm:Optional[str]=None, callback:Optional[callable]=None) -> None:
+    def start_streaming(self, callback:Optional[callable]=None) -> None:
         self.pipeline.stop()
         if not hasattr(self, "_collect_streaming_data"):
             self._collect_streaming_data = True
+        if not hasattr(self, "_shm"):
+            self._shm = None
+        
         if callback is not None:
             self.pipeline_profile = self.pipeline.start(self.config, callback)
         else:
-            if shm is None:
+            if self._shm is None:
                 if self._image:
                     self.image_streaming_mutex = Lock()
                     self.image_streaming_data = {
@@ -127,40 +129,56 @@ class T265(CameraBase):
                     "quat": [], 
                     "timestamp_ms": [], 
                 }
-                self.pipeline_profile = self.pipeline.start(self.config, partial(self.callback, shm=False))
             else:
                 self.streaming_manager = Manager()
                 self.pose_streaming_lock = self.streaming_manager.Lock()
-                xyz_memory_size = np.dtype(self.xyz_dtype).itemsize * np.prod(self.xyz_shape)
-                quat_memory_size = np.dtype(self.quat_dtype).itemsize * np.prod(self.quat_shape)
+                xyz_memory_size = self.xyz_dtype.itemsize * np.prod(self.xyz_shape).item()
+                quat_memory_size = self.quat_dtype.itemsize * np.prod(self.quat_shape).item()
                 timestamp_memory_size = np.dtype(np.float64).itemsize
                 pose_streaming_memory_size = xyz_memory_size + quat_memory_size + timestamp_memory_size
-                self.pose_streaming_memory = shared_memory.SharedMemory(name=shm+'_pose', create=True, size=pose_streaming_memory_size)
+                self.pose_streaming_memory = shared_memory.SharedMemory(name=self._shm+'_pose', create=True, size=pose_streaming_memory_size)
                 self.pose_streaming_array = {
                     "xyz": np.ndarray(self.xyz_shape, dtype=self.xyz_dtype, buffer=self.pose_streaming_memory.buf[:xyz_memory_size]), 
                     "quat": np.ndarray(self.quat_shape, dtype=self.quat_dtype, buffer=self.pose_streaming_memory.buf[xyz_memory_size:xyz_memory_size+quat_memory_size]), 
                     "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.pose_streaming_memory.buf[xyz_memory_size+quat_memory_size:])
                 }
+                self.pose_streaming_array_meta = {
+                    "xyz": (self.xyz_shape, self.xyz_dtype.name, (0, xyz_memory_size)), 
+                    "quat": (self.quat_shape, self.quat_dtype.name, (xyz_memory_size, xyz_memory_size+quat_memory_size)), 
+                    "timestamp_ms": ((1,), np.float64.__name__, (xyz_memory_size+quat_memory_size, xyz_memory_size+quat_memory_size+timestamp_memory_size))
+                }
                 if self._image:
                     self.image_streaming_lock = self.streaming_manager.Lock()
-                    left_memory_size = np.dtype(self.left_image_dtype).itemsize * np.prod(self.left_image_shape)
-                    right_memory_size = np.dtype(self.right_image_dtype).itemsize * np.prod(self.right_image_shape)
+                    left_memory_size = self.left_image_dtype.itemsize * np.prod(self.left_image_shape).item()
+                    right_memory_size = self.right_image_dtype.itemsize * np.prod(self.right_image_shape).item()
                     image_streaming_memory_size = left_memory_size + right_memory_size + timestamp_memory_size
-                    self.image_streaming_memory = shared_memory.SharedMemory(name=shm+'_image', create=True, size=image_streaming_memory_size)
+                    self.image_streaming_memory = shared_memory.SharedMemory(name=self._shm+'_image', create=True, size=image_streaming_memory_size)
                     self.image_streaming_array = {
                         "left": np.ndarray(self.left_image_shape, dtype=self.left_image_dtype, buffer=self.image_streaming_memory.buf[:left_memory_size]), 
                         "right": np.ndarray(self.right_image_shape, dtype=self.right_image_dtype, buffer=self.image_streaming_memory.buf[left_memory_size:left_memory_size+right_memory_size]), 
                         "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.image_streaming_memory.buf[left_memory_size+right_memory_size:])
                     }
-                self.pipeline_profile = self.pipeline.start(self.config, partial(self.callback, shm=True))
+                    self.image_streaming_array_meta = {
+                        "left": (self.left_image_shape, self.left_image_dtype.name, (0, left_memory_size)), 
+                        "right": (self.right_image_shape, self.right_image_dtype.name, (left_memory_size, left_memory_size+right_memory_size)), 
+                        "timestamp_ms": ((1,), np.float64.__name__, (left_memory_size+right_memory_size, left_memory_size+right_memory_size+timestamp_memory_size))
+                    }
+            self.pipeline_profile = self.pipeline.start(self.config, self.callback)
         self.in_streaming = True
 
-    def stop_streaming(self) -> Optional[dict]:
-        streaming_data = None
+    def stop_streaming(self) -> Dict[str, List[Union[np.ndarray, float]]]:
         self.pipeline.stop()
         if hasattr(self, "pose_streaming_data"):
+            streaming_data = {'pose': self.pose_streaming_data}
+            self.pose_streaming_data = {
+                "xyz": [], 
+                "quat": [], 
+                "timestamp_ms": [], 
+            }
+            del self.pose_streaming_data
+            del self.pose_streaming_mutex
             if self._image:
-                streaming_data = {'image': self.image_streaming_data}
+                streaming_data['image'] = self.image_streaming_data
                 self.image_streaming_data = {
                     "left": [], 
                     "right": [], 
@@ -168,7 +186,104 @@ class T265(CameraBase):
                 }
                 del self.image_streaming_data
                 del self.image_streaming_mutex
-            streaming_data['pose'] = self.pose_streaming_data
+        elif hasattr(self, "pose_streaming_array"):
+            streaming_data = {'pose': {
+                "xyz": [np.copy(self.pose_streaming_array["xyz"])], 
+                "quat": [np.copy(self.pose_streaming_array["quat"])], 
+                "timestamp_ms": [self.pose_streaming_array["timestamp_ms"].item()]
+            }}
+            self.pose_streaming_memory.close()
+            self.pose_streaming_memory.unlink()
+            del self.pose_streaming_memory
+            del self.pose_streaming_array, self.pose_streaming_array_meta
+            del self.pose_streaming_lock
+            if self._image:
+                streaming_data['image'] = {
+                    "left": [np.copy(self.image_streaming_array["left"])], 
+                    "right": [np.copy(self.image_streaming_array["right"])], 
+                    "timestamp_ms": [self.image_streaming_array["timestamp_ms"].item()]
+                }
+                self.image_streaming_memory.close()
+                self.image_streaming_memory.unlink()
+                del self.image_streaming_memory
+                del self.image_streaming_array, self.image_streaming_array_meta
+                del self.image_streaming_lock
+            del self.streaming_manager
+        else:
+            raise AttributeError
+        self.pipeline_profile = self.pipeline.start(self.config)
+        self.in_streaming = False
+        return streaming_data
+    
+    def save_streaming(self, save_path:str, streaming_data:dict) -> None:
+        if self._image:
+            assert len(streaming_data["image"]["left"]) == len(streaming_data["image"]["right"]) == len(streaming_data["image"]["timestamp_ms"])
+            os.makedirs(os.path.join(save_path, 'image'), exist_ok=True)
+            np.save(os.path.join(save_path, 'image', "timestamps.npy"), np.array(streaming_data["image"]["timestamp_ms"], dtype=float))
+            if len(streaming_data["image"]["timestamp_ms"]) > 1:
+                freq = len(streaming_data["image"]["timestamp_ms"]) / (streaming_data["image"]["timestamp_ms"][-1] - streaming_data["image"]["timestamp_ms"][0])
+                draw_time(streaming_data["image"]["timestamp_ms"], os.path.join(save_path, 'image', f"freq_{freq}.png"))
+            else:
+                freq = 0
+            os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
+            os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
+            save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"])
+            save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"])
+        assert len(streaming_data["pose"]["xyz"]) == len(streaming_data["pose"]["quat"]) == len(streaming_data["pose"]["timestamp_ms"])
+        os.makedirs(os.path.join(save_path, 'pose'), exist_ok=True)
+        np.save(os.path.join(save_path, 'pose', "timestamps.npy"), np.array(streaming_data["pose"]["timestamp_ms"], dtype=float))
+        if len(streaming_data["pose"]["timestamp_ms"]) > 1:
+            freq = len(streaming_data["pose"]["timestamp_ms"]) / (streaming_data["pose"]["timestamp_ms"][-1] - streaming_data["pose"]["timestamp_ms"][0])
+            draw_time(streaming_data["pose"]["timestamp_ms"], os.path.join(save_path, 'pose', f"freq_{freq}.png"))
+        else:
+            freq = 0
+        np.save(os.path.join(save_path, 'pose', "xyz.npy"), np.array(streaming_data["pose"]["xyz"], dtype=float))
+        np.save(os.path.join(save_path, 'pose', "quat.npy"), np.array(streaming_data["pose"]["quat"], dtype=float))
+    
+    def collect_streaming(self, collect:bool=True) -> None:
+        # NOTE: only valid for no-custom-callback
+        self._collect_streaming_data = collect
+    
+    def shm_streaming(self, shm:Optional[str]=None) -> None:
+        # NOTE: only valid for non-custom-callback
+        assert (not self.in_streaming) or (not self._collect_streaming_data)
+        self._shm = shm
+    
+    def get_streaming(self) -> Dict[str, List[Union[np.ndarray, float]]]:
+        # NOTE: only valid for non-custom-callback
+        assert not self._collect_streaming_data
+        if hasattr(self, "pose_streaming_data"):
+            streaming_data = {'pose': self.pose_streaming_data}
+            if self._image:
+                streaming_data['image'] = self.image_streaming_data
+        elif hasattr(self, "pose_streaming_array"):
+            streaming_data = {'pose': {
+                "xyz": [np.copy(self.pose_streaming_array["xyz"])], 
+                "quat": [np.copy(self.pose_streaming_array["quat"])], 
+                "timestamp_ms": [self.pose_streaming_array["timestamp_ms"].item()]
+            }}
+            if self._image:
+                streaming_data['image'] = {
+                    "left": [np.copy(self.image_streaming_array["left"])], 
+                    "right": [np.copy(self.image_streaming_array["right"])], 
+                    "timestamp_ms": [self.image_streaming_array["timestamp_ms"].item()]
+                }
+        else:
+            raise AttributeError
+        return streaming_data
+    
+    def reset_streaming(self) -> None:
+        # NOTE: only valid for non-custom-callback
+        assert not self._collect_streaming_data
+        if hasattr(self, "pose_streaming_data"):
+            if self._image:
+                self.image_streaming_data = {
+                    "left": [], 
+                    "right": [], 
+                    "timestamp_ms": [], 
+                }
+                del self.image_streaming_data
+                del self.image_streaming_mutex
             self.pose_streaming_data = {
                 "xyz": [], 
                 "quat": [], 
@@ -178,57 +293,70 @@ class T265(CameraBase):
             del self.pose_streaming_mutex
         elif hasattr(self, "pose_streaming_array"):
             if self._image:
-                streaming_data = {'image': {
-                    "left": [np.copy(self.image_streaming_array["left"])], 
-                    "right": [np.copy(self.image_streaming_array["right"])], 
-                    "timestamp_ms": [self.image_streaming_array["timestamp_ms"].item()]
-                }}
                 self.image_streaming_memory.close()
                 self.image_streaming_memory.unlink()
                 del self.image_streaming_memory
-                del self.image_streaming_array
+                del self.image_streaming_array, self.image_streaming_array_meta
                 del self.image_streaming_lock
-            streaming_data['pose'] = {
-                "xyz": [np.copy(self.pose_streaming_array["xyz"])], 
-                "quat": [np.copy(self.pose_streaming_array["quat"])], 
-                "timestamp_ms": [self.pose_streaming_array["timestamp_ms"].item()]
-            }
             self.pose_streaming_memory.close()
             self.pose_streaming_memory.unlink()
             del self.pose_streaming_memory
-            del self.pose_streaming_array
+            del self.pose_streaming_array, self.pose_streaming_array_meta
             del self.pose_streaming_lock
             del self.streaming_manager
         else:
             raise AttributeError
-        self.pipeline_profile = self.pipeline.start(self.config)
-        self.in_streaming = False
-        return streaming_data
+        
+        if self._shm is None:
+            if self._image:
+                self.image_streaming_mutex = Lock()
+                self.image_streaming_data = {
+                    "left": [], 
+                    "right": [], 
+                    "timestamp_ms": [], 
+                }
+            self.pose_streaming_mutex = Lock()
+            self.pose_streaming_data = {
+                "xyz": [], 
+                "quat": [], 
+                "timestamp_ms": [], 
+            }
+        else:
+            self.streaming_manager = Manager()
+            self.pose_streaming_lock = self.streaming_manager.Lock()
+            xyz_memory_size = self.xyz_dtype.itemsize * np.prod(self.xyz_shape).item()
+            quat_memory_size = self.quat_dtype.itemsize * np.prod(self.quat_shape).item()
+            timestamp_memory_size = np.dtype(np.float64).itemsize
+            pose_streaming_memory_size = xyz_memory_size + quat_memory_size + timestamp_memory_size
+            self.pose_streaming_memory = shared_memory.SharedMemory(name=self._shm+'_pose', create=True, size=pose_streaming_memory_size)
+            self.pose_streaming_array = {
+                "xyz": np.ndarray(self.xyz_shape, dtype=self.xyz_dtype, buffer=self.pose_streaming_memory.buf[:xyz_memory_size]), 
+                "quat": np.ndarray(self.quat_shape, dtype=self.quat_dtype, buffer=self.pose_streaming_memory.buf[xyz_memory_size:xyz_memory_size+quat_memory_size]), 
+                "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.pose_streaming_memory.buf[xyz_memory_size+quat_memory_size:])
+            }
+            self.pose_streaming_array_meta = {
+                "xyz": (self.xyz_shape, self.xyz_dtype.name, (0, xyz_memory_size)), 
+                "quat": (self.quat_shape, self.quat_dtype.name, (xyz_memory_size, xyz_memory_size+quat_memory_size)), 
+                "timestamp_ms": ((1,), np.float64.__name__, (xyz_memory_size+quat_memory_size, xyz_memory_size+quat_memory_size+timestamp_memory_size))
+            }
+            if self._image:
+                self.image_streaming_lock = self.streaming_manager.Lock()
+                left_memory_size = self.left_image_dtype.itemsize * np.prod(self.left_image_shape).item()
+                right_memory_size = self.right_image_dtype.itemsize * np.prod(self.right_image_shape).item()
+                image_streaming_memory_size = left_memory_size + right_memory_size + timestamp_memory_size
+                self.image_streaming_memory = shared_memory.SharedMemory(name=self._shm+'_image', create=True, size=image_streaming_memory_size)
+                self.image_streaming_array = {
+                    "left": np.ndarray(self.left_image_shape, dtype=self.left_image_dtype, buffer=self.image_streaming_memory.buf[:left_memory_size]), 
+                    "right": np.ndarray(self.right_image_shape, dtype=self.right_image_dtype, buffer=self.image_streaming_memory.buf[left_memory_size:left_memory_size+right_memory_size]), 
+                    "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.image_streaming_memory.buf[left_memory_size+right_memory_size:])
+                }
+                self.image_streaming_array_meta = {
+                    "left": (self.left_image_shape, self.left_image_dtype.name, (0, left_memory_size)), 
+                    "right": (self.right_image_shape, self.right_image_dtype.name, (left_memory_size, left_memory_size+right_memory_size)), 
+                    "timestamp_ms": ((1,), np.float64.__name__, (left_memory_size+right_memory_size, left_memory_size+right_memory_size+timestamp_memory_size))
+                }
     
-    def save_streaming(self, save_path:str, streaming_data:dict) -> None:
-        assert len(streaming_data["image"]["left"]) == len(streaming_data["image"]["right"]) == len(streaming_data["image"]["timestamp_ms"])
-        assert len(streaming_data["pose"]["xyz"]) == len(streaming_data["pose"]["quat"]) == len(streaming_data["pose"]["timestamp_ms"])
-        if self._image:
-            os.makedirs(os.path.join(save_path, 'image'), exist_ok=True)
-            np.save(os.path.join(save_path, 'image', "timestamps.npy"), np.array(streaming_data["image"]["timestamp_ms"], dtype=float))
-            freq = len(streaming_data["image"]["timestamp_ms"]) / (streaming_data["image"]["timestamp_ms"][-1] - streaming_data["image"]["timestamp_ms"][0])
-            draw_time(streaming_data["image"]["timestamp_ms"], os.path.join(save_path, 'image', f"freq_{freq}.png"))
-            os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
-            os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
-            save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"])
-            save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"])
-        os.makedirs(os.path.join(save_path, 'pose'), exist_ok=True)
-        np.save(os.path.join(save_path, 'pose', "timestamps.npy"), np.array(streaming_data["pose"]["timestamp_ms"], dtype=float))
-        freq = len(streaming_data["pose"]["timestamp_ms"]) / (streaming_data["pose"]["timestamp_ms"][-1] - streaming_data["pose"]["timestamp_ms"][0])
-        draw_time(streaming_data["pose"]["timestamp_ms"], os.path.join(save_path, 'pose', f"freq_{freq}.png"))
-        np.save(os.path.join(save_path, 'pose', "xyz.npy"), np.array(streaming_data["pose"]["xyz"], dtype=float))
-        np.save(os.path.join(save_path, 'pose', "quat.npy"), np.array(streaming_data["pose"]["quat"], dtype=float))
-    
-    def collect_streaming(self, collect:bool=True) -> None:
-        # NOTE: only valid for no-custom-callback
-        self._collect_streaming_data = collect
-    
-    def callback(self, frame, shm:bool=False):
+    def callback(self, frame):
         ts = time.time() * 1000
         if not self._collect_streaming_data:
             return
@@ -240,7 +368,7 @@ class T265(CameraBase):
             left_data = np.asanyarray(f1.get_data(), dtype=np.uint8)
             right_data = np.asanyarray(f2.get_data(), dtype=np.uint8)
             # ts = frameset.get_timestamp()
-            if not shm:
+            if hasattr(self, "pose_streaming_data"):
                 self.image_streaming_mutex.acquire()
                 if len(self.image_streaming_data["timestamp_ms"]) != 0 and ts == self.image_streaming_data["timestamp_ms"][-1]:
                     pass
@@ -249,11 +377,13 @@ class T265(CameraBase):
                     self.image_streaming_data["right"].append(right_data.copy())
                     self.image_streaming_data["timestamp_ms"].append(ts)
                 self.image_streaming_mutex.release()
-            else:
+            elif hasattr(self, "pose_streaming_array"):
                 with self.image_streaming_lock:
                     self.image_streaming_array["left"][:] = left_data[:]
                     self.image_streaming_array["right"][:] = right_data[:]
                     self.image_streaming_array["timestamp_ms"][:] = ts
+            else:
+                raise AttributeError
         
         if frame.is_pose_frame():
             pose_frame = frame.as_pose_frame()
@@ -261,7 +391,7 @@ class T265(CameraBase):
             xyz = np.array([pose_data_.translation.x, pose_data_.translation.y, pose_data_.translation.z], dtype=np.float64)
             quat = np.array([pose_data_.rotation.x, pose_data_.rotation.y, pose_data_.rotation.z, pose_data_.rotation.w], dtype=np.float64)
             # ts = pose_frame.timestamp
-            if not shm:
+            if hasattr(self, "pose_streaming_data"):
                 self.pose_streaming_mutex.acquire()
                 if len(self.pose_streaming_data["timestamp_ms"]) != 0 and ts == self.pose_streaming_data["timestamp_ms"][-1]:
                     pass
@@ -270,11 +400,13 @@ class T265(CameraBase):
                     self.pose_streaming_data["quat"].append(quat)
                     self.pose_streaming_data["timestamp_ms"].append(ts)
                 self.pose_streaming_mutex.release()
-            else:
+            elif hasattr(self, "pose_streaming_array"):
                 with self.pose_streaming_lock:
                     self.pose_streaming_array["xyz"][:] = xyz[:]
                     self.pose_streaming_array["quat"][:] = quat[:]
                     self.pose_streaming_array["timestamp_ms"][:] = ts
+            else:
+                raise AttributeError
     
     @staticmethod
     def raw2pose(xyz:np.ndarray, quat:np.ndarray) -> np.ndarray:
@@ -330,7 +462,9 @@ if __name__ == "__main__":
             else:
                 raise ValueError
     else:
-        camera.start_streaming(shm='T265' if shm else None)
+        camera.collect_streaming(collect=True)
+        camera.shm_streaming(shm='T265' if shm else None)
+        camera.start_streaming()
 
         cmd = input("quit? (enter): ")
         streaming_data = camera.stop_streaming()
