@@ -2,6 +2,7 @@ import os
 from typing import List, Dict, Optional
 import struct
 import time
+import gc
 import numpy as np
 from threading import Thread, Lock, Event
 from multiprocessing import shared_memory, Manager
@@ -239,12 +240,11 @@ class Angler(EncoderBase):
         # NOTE: only valid for non-custom-callback
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):
-            self.streaming_data = {
-                "angle": [], 
-                "timestamp_ms": []
-            }
+            self.streaming_data['angle'].clear()
+            self.streaming_data['timestamp_ms'].clear()
             del self.streaming_data
             del self.streaming_mutex
+            gc.collect()
         elif hasattr(self, "streaming_array"):
             self.streaming_memory.close()
             self.streaming_memory.unlink()

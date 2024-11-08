@@ -1,6 +1,7 @@
 import os
 from typing import Tuple, List, Union, Dict, Optional
 import time
+import gc
 import numpy as np
 import cv2
 from threading import Lock
@@ -191,13 +192,12 @@ class D415(CameraBase):
         # NOTE: only valid for non-custom-callback
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):
-            self.streaming_data = {
-                "depth": [], 
-                "color": [], 
-                "timestamp_ms": []
-            }
+            self.streaming_data['depth'].clear()
+            self.streaming_data['color'].clear()
+            self.streaming_data['timestamp_ms'].clear()
             del self.streaming_data
             del self.streaming_mutex
+            gc.collect()
         elif hasattr(self, "streaming_array"):
             self.streaming_memory.close()
             self.streaming_memory.unlink()

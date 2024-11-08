@@ -1,6 +1,7 @@
 import os
 from typing import Tuple, List, Union, Dict, Optional
 import time
+import gc
 import numpy as np
 import cv2
 from scipy.spatial.transform import Rotation as Rot
@@ -277,20 +278,17 @@ class T265(CameraBase):
         assert not self._collect_streaming_data
         if hasattr(self, "pose_streaming_data"):
             if self._image:
-                self.image_streaming_data = {
-                    "left": [], 
-                    "right": [], 
-                    "timestamp_ms": [], 
-                }
+                self.image_streaming_data['left'].clear()
+                self.image_streaming_data['right'].clear()
+                self.image_streaming_data['timestamp_ms'].clear()
                 del self.image_streaming_data
                 del self.image_streaming_mutex
-            self.pose_streaming_data = {
-                "xyz": [], 
-                "quat": [], 
-                "timestamp_ms": [], 
-            }
+            self.pose_streaming_data['xyz'].clear()
+            self.pose_streaming_data['quat'].clear()
+            self.pose_streaming_data['timestamp_ms'].clear()
             del self.pose_streaming_data
             del self.pose_streaming_mutex
+            gc.collect()
         elif hasattr(self, "pose_streaming_array"):
             if self._image:
                 self.image_streaming_memory.close()
