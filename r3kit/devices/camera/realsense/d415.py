@@ -15,8 +15,9 @@ from r3kit.utils.vis import draw_time, save_imgs
 
 
 class D415(CameraBase):
-    def __init__(self, id:Optional[str]=D415_ID, name:str='D415') -> None:
+    def __init__(self, id:Optional[str]=D415_ID, depth:bool=True, name:str='D415') -> None:
         super().__init__(name=name)
+        self._depth = depth
 
         self.pipeline = rs.pipeline()
         self.config = rs.config()
@@ -25,6 +26,8 @@ class D415(CameraBase):
         else:
             pass
         for stream_item in D415_STREAMS:
+            if not depth and stream_item[0] == rs.stream.depth:
+                continue
             self.config.enable_stream(*stream_item)
         # NOTE: hard code config
         self.align = rs.align(rs.stream.color)
@@ -33,54 +36,67 @@ class D415(CameraBase):
         self.inpaint = False
         
         self.pipeline_profile = self.pipeline.start(self.config)
-        depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
-        self.depth_scale = depth_sensor.get_depth_scale()
+        if self._depth:
+            depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
+            self.depth_scale = depth_sensor.get_depth_scale()
         frames = self.pipeline.wait_for_frames()
-        color_frame = frames.get_color_frame().as_video_frame()
-        depth_frame = frames.get_depth_frame().as_depth_frame()
-        self.depth2color = depth_frame.get_profile().get_extrinsics_to(color_frame.get_profile())
+        if self._depth:
+            color_frame = frames.get_color_frame().as_video_frame()
+            depth_frame = frames.get_depth_frame().as_depth_frame()
+            depth2color = depth_frame.get_profile().get_extrinsics_to(color_frame.get_profile())
+            self.depth2color = np.eye(4)
+            self.depth2color[:3, :3] = np.array(depth2color.rotation).reshape((3, 3))
+            self.depth2color[:3, 3] = depth2color.translation
         aligned_frames = self.align.process(frames)
         color_frame = aligned_frames.get_color_frame()
         color_intrinsics = color_frame.get_profile().as_video_stream_profile().get_intrinsics()
         self.color_intrinsics = [color_intrinsics.ppx, color_intrinsics.ppy, color_intrinsics.fx, color_intrinsics.fy]
         color_frame = color_frame.as_video_frame()
-        depth_frame = aligned_frames.get_depth_frame().as_depth_frame()
         color_image = np.asanyarray(color_frame.get_data(), dtype=np.uint8)
-        depth_image = np.asanyarray(depth_frame.get_data(), dtype=np.uint16)
         self.color_image_dtype = color_image.dtype
         self.color_image_shape = color_image.shape
-        self.depth_image_dtype = depth_image.dtype
-        self.depth_image_shape = depth_image.shape
+        if self._depth:
+            depth_frame = aligned_frames.get_depth_frame().as_depth_frame()
+            depth_image = np.asanyarray(depth_frame.get_data(), dtype=np.uint16)
+            self.depth_image_dtype = depth_image.dtype
+            self.depth_image_shape = depth_image.shape
         
         self.in_streaming = False
 
-    def get(self) -> Tuple[np.ndarray, np.ndarray]:
+    def get(self) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         if not self.in_streaming:
             frames = self.pipeline.wait_for_frames()
             aligned_frames = self.align.process(frames)
             color_frame = aligned_frames.get_color_frame().as_video_frame()
-            depth_frame = aligned_frames.get_depth_frame().as_depth_frame()
-            if self.hole_filling is not None:
-                depth_frame = self.hole_filling.process(depth_frame)
             color_image = np.asanyarray(color_frame.get_data(), dtype=np.uint8)
-            depth_image = np.asanyarray(depth_frame.get_data(), dtype=np.uint16)
-            if self.inpaint:
-                depth_image = inpaint(depth_image, missing_value=0)
-            return (color_image, depth_image)
+            if self._depth:
+                depth_frame = aligned_frames.get_depth_frame().as_depth_frame()
+                if self.hole_filling is not None:
+                    depth_frame = self.hole_filling.process(depth_frame)
+                depth_image = np.asanyarray(depth_frame.get_data(), dtype=np.uint16)
+                if self.inpaint:
+                    depth_image = inpaint(depth_image, missing_value=0)
+            else:
+                depth_image = None
         else:
             if hasattr(self, "streaming_data"):
                 self.streaming_mutex.acquire()
                 color_image = self.streaming_data["color"][-1]
-                depth_image = self.streaming_data["depth"][-1]
+                if self._depth:
+                    depth_image = self.streaming_data["depth"][-1]
+                else:
+                    depth_image = None
                 self.streaming_mutex.release()
-                return (color_image, depth_image)
             elif hasattr(self, "streaming_array"):
                 with self.streaming_lock:
                     color_image = np.copy(self.streaming_array["color"])
-                    depth_image = np.copy(self.streaming_array["depth"])
-                return (color_image, depth_image)
+                    if self._depth:
+                        depth_image = np.copy(self.streaming_array["depth"])
+                    else:
+                        depth_image = None
             else:
                 raise AttributeError
+        return (color_image, depth_image)
     
     def start_streaming(self, callback:Optional[callable]=None) -> None:
         self.pipeline.stop()
@@ -95,28 +111,33 @@ class D415(CameraBase):
             if self._shm is None:
                 self.streaming_mutex = Lock()
                 self.streaming_data = {
-                    "depth": [], 
                     "color": [], 
                     "timestamp_ms": []
                 }
+                if self._depth:
+                    self.streaming_data["depth"] = []
             else:
                 self.streaming_manager = Manager()
                 self.streaming_lock = self.streaming_manager.Lock()
-                depth_memory_size = self.depth_image_dtype.itemsize * np.prod(self.depth_image_shape).item()
+                if self._depth:
+                    depth_memory_size = self.depth_image_dtype.itemsize * np.prod(self.depth_image_shape).item()
+                else:
+                    depth_memory_size = 0
                 color_memory_size = self.color_image_dtype.itemsize * np.prod(self.color_image_shape).item()
                 timestamp_memory_size = np.dtype(np.float64).itemsize
                 streaming_memory_size = depth_memory_size + color_memory_size + timestamp_memory_size
                 self.streaming_memory = shared_memory.SharedMemory(name=self._shm, create=True, size=streaming_memory_size)
                 self.streaming_array = {
-                    "depth": np.ndarray(self.depth_image_shape, dtype=self.depth_image_dtype, buffer=self.streaming_memory.buf[:depth_memory_size]), 
                     "color": np.ndarray(self.color_image_shape, dtype=self.color_image_dtype, buffer=self.streaming_memory.buf[depth_memory_size:depth_memory_size+color_memory_size]), 
                     "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.streaming_memory.buf[depth_memory_size+color_memory_size:])
                 }
                 self.streaming_array_meta = {
-                    "depth": (self.depth_image_shape, self.depth_image_dtype.name, (0, depth_memory_size)), 
                     "color": (self.color_image_shape, self.color_image_dtype.name, (depth_memory_size, depth_memory_size+color_memory_size)), 
                     "timestamp_ms": ((1,), np.float64.__name__, (depth_memory_size+color_memory_size, depth_memory_size+color_memory_size+timestamp_memory_size))
                 }
+                if self._depth:
+                    self.streaming_array["depth"] = np.ndarray(self.depth_image_shape, dtype=self.depth_image_dtype, buffer=self.streaming_memory.buf[:depth_memory_size])
+                    self.streaming_array_meta["depth"] = (self.depth_image_shape, self.depth_image_dtype.name, (0, depth_memory_size))
             self.pipeline_profile = self.pipeline.start(self.config, self.callback)
         self.in_streaming = True
 
@@ -125,18 +146,20 @@ class D415(CameraBase):
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
             self.streaming_data = {
-                "depth": [], 
                 "color": [], 
                 "timestamp_ms": []
             }
+            if self._depth:
+                self.streaming_data["depth"] = []
             del self.streaming_data
             del self.streaming_mutex
         elif hasattr(self, "streaming_array"):
             streaming_data = {
-                "depth": [np.copy(self.streaming_array["depth"])], 
                 "color": [np.copy(self.streaming_array["color"])], 
                 "timestamp_ms": [self.streaming_array["timestamp_ms"].item()]
             }
+            if self._depth:
+                streaming_data["depth"] = [np.copy(self.streaming_array["depth"])]
             self.streaming_memory.close()
             self.streaming_memory.unlink()
             del self.streaming_memory
@@ -150,19 +173,24 @@ class D415(CameraBase):
         return streaming_data
     
     def save_streaming(self, save_path:str, streaming_data:dict) -> None:
-        assert len(streaming_data["depth"]) == len(streaming_data["color"]) == len(streaming_data["timestamp_ms"])
+        assert len(streaming_data["color"]) == len(streaming_data["timestamp_ms"])
+        if self._depth:
+            assert len(streaming_data["depth"]) == len(streaming_data["timestamp_ms"])
         np.savetxt(os.path.join(save_path, "intrinsics.txt"), self.color_intrinsics, fmt="%.16f")
-        np.savetxt(os.path.join(save_path, "depth_scale.txt"), [self.depth_scale], fmt="%.16f")
+        if self._depth:
+            np.savetxt(os.path.join(save_path, "depth_scale.txt"), [self.depth_scale], fmt="%.16f")
+            np.savetxt(os.path.join(save_path, "depth2color.txt"), self.depth2color, fmt="%.16f")
         np.save(os.path.join(save_path, "timestamps.npy"), np.array(streaming_data["timestamp_ms"], dtype=float))
         if len(streaming_data["timestamp_ms"]) > 1:
             freq = len(streaming_data["timestamp_ms"]) / (streaming_data["timestamp_ms"][-1] - streaming_data["timestamp_ms"][0])
             draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
         else:
             freq = 0
-        os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
         os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
-        save_imgs(os.path.join(save_path, 'depth'), streaming_data["depth"])
         save_imgs(os.path.join(save_path, 'color'), streaming_data["color"])
+        if self._depth:
+            os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
+            save_imgs(os.path.join(save_path, 'depth'), streaming_data["depth"])
     
     def collect_streaming(self, collect:bool=True) -> None:
         # NOTE: only valid for no-custom-callback
@@ -180,10 +208,11 @@ class D415(CameraBase):
             streaming_data = self.streaming_data
         elif hasattr(self, "streaming_array"):
             streaming_data = {
-                "depth": [np.copy(self.streaming_array["depth"])], 
                 "color": [np.copy(self.streaming_array["color"])], 
                 "timestamp_ms": [self.streaming_array["timestamp_ms"].item()]
             }
+            if self._depth:
+                streaming_data["depth"] = [np.copy(self.streaming_array["depth"])]
         else:
             raise AttributeError
         return streaming_data
@@ -192,9 +221,10 @@ class D415(CameraBase):
         # NOTE: only valid for non-custom-callback
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):
-            self.streaming_data['depth'].clear()
             self.streaming_data['color'].clear()
             self.streaming_data['timestamp_ms'].clear()
+            if self._depth:
+                self.streaming_data['depth'].clear()
             del self.streaming_data
             del self.streaming_mutex
             gc.collect()
@@ -211,28 +241,33 @@ class D415(CameraBase):
         if self._shm is None:
             self.streaming_mutex = Lock()
             self.streaming_data = {
-                "depth": [], 
                 "color": [], 
                 "timestamp_ms": []
             }
+            if self._depth:
+                self.streaming_data["depth"] = []
         else:
             self.streaming_manager = Manager()
             self.streaming_lock = self.streaming_manager.Lock()
-            depth_memory_size = self.depth_image_dtype.itemsize * np.prod(self.depth_image_shape).item()
+            if self._depth:
+                depth_memory_size = self.depth_image_dtype.itemsize * np.prod(self.depth_image_shape).item()
+            else:
+                depth_memory_size = 0
             color_memory_size = self.color_image_dtype.itemsize * np.prod(self.color_image_shape).item()
             timestamp_memory_size = np.dtype(np.float64).itemsize
             streaming_memory_size = depth_memory_size + color_memory_size + timestamp_memory_size
             self.streaming_memory = shared_memory.SharedMemory(name=self._shm, create=True, size=streaming_memory_size)
             self.streaming_array = {
-                "depth": np.ndarray(self.depth_image_shape, dtype=self.depth_image_dtype, buffer=self.streaming_memory.buf[:depth_memory_size]), 
                 "color": np.ndarray(self.color_image_shape, dtype=self.color_image_dtype, buffer=self.streaming_memory.buf[depth_memory_size:depth_memory_size+color_memory_size]), 
                 "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.streaming_memory.buf[depth_memory_size+color_memory_size:])
             }
             self.streaming_array_meta = {
-                "depth": (self.depth_image_shape, self.depth_image_dtype.name, (0, depth_memory_size)), 
                 "color": (self.color_image_shape, self.color_image_dtype.name, (depth_memory_size, depth_memory_size+color_memory_size)), 
                 "timestamp_ms": ((1,), np.float64.__name__, (depth_memory_size+color_memory_size, depth_memory_size+color_memory_size+timestamp_memory_size))
             }
+            if self._depth:
+                self.streaming_array["depth"] = np.ndarray(self.depth_image_shape, dtype=self.depth_image_dtype, buffer=self.streaming_memory.buf[:depth_memory_size])
+                self.streaming_array_meta["depth"] = (self.depth_image_shape, self.depth_image_dtype.name, (0, depth_memory_size))
     
     def callback(self, frame):
         ts = time.time() * 1000
@@ -243,26 +278,29 @@ class D415(CameraBase):
             frameset = frame.as_frameset()
             frameset = self.align.process(frameset)
             color_frame = frameset.get_color_frame().as_video_frame()
-            depth_frame = frameset.get_depth_frame().as_depth_frame()
-            if self.hole_filling is not None:
-                depth_frame = self.hole_filling.process(depth_frame)
             color_image = np.asanyarray(color_frame.get_data(), dtype=np.uint8)
-            depth_image = np.asanyarray(depth_frame.get_data(), dtype=np.uint16)
-            if self.inpaint:
-                depth_image = inpaint(depth_image, missing_value=0)
+            if self._depth:
+                depth_frame = frameset.get_depth_frame().as_depth_frame()
+                if self.hole_filling is not None:
+                    depth_frame = self.hole_filling.process(depth_frame)
+                depth_image = np.asanyarray(depth_frame.get_data(), dtype=np.uint16)
+                if self.inpaint:
+                    depth_image = inpaint(depth_image, missing_value=0)
             # ts = frameset.get_timestamp()
             if hasattr(self, "streaming_data"):
                 self.streaming_mutex.acquire()
                 if len(self.streaming_data["timestamp_ms"]) != 0 and ts == self.streaming_data["timestamp_ms"][-1]:
                     pass
                 else:
-                    self.streaming_data["depth"].append(depth_image.copy())
+                    if self._depth:
+                        self.streaming_data["depth"].append(depth_image.copy())
                     self.streaming_data["color"].append(color_image.copy())
                     self.streaming_data["timestamp_ms"].append(ts)
                 self.streaming_mutex.release()
             elif hasattr(self, "streaming_array"):
                 with self.streaming_lock:
-                    self.streaming_array["depth"][:] = depth_image[:]
+                    if self._depth:
+                        self.streaming_array["depth"][:] = depth_image[:]
                     self.streaming_array["color"][:] = color_image[:]
                     self.streaming_array["timestamp_ms"][:] = ts
             else:
@@ -292,7 +330,7 @@ class D415(CameraBase):
 if __name__ == "__main__":
     from r3kit.utils.vis import vis_pc
 
-    camera = D415(id='104122063633', name='D415')
+    camera = D415(id='104122063633', depth=True, name='D415')
     streaming = False
     shm = False
 

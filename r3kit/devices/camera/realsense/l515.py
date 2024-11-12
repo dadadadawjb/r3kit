@@ -38,7 +38,10 @@ class L515(CameraBase):
         frames = self.pipeline.wait_for_frames()
         color_frame = frames.get_color_frame().as_video_frame()
         depth_frame = frames.get_depth_frame().as_depth_frame()
-        self.depth2color = depth_frame.get_profile().get_extrinsics_to(color_frame.get_profile())
+        depth2color = depth_frame.get_profile().get_extrinsics_to(color_frame.get_profile())
+        self.depth2color = np.eye(4)
+        self.depth2color[:3, :3] = np.array(depth2color.rotation).reshape((3, 3))
+        self.depth2color[:3, 3] = depth2color.translation
         aligned_frames = self.align.process(frames)
         color_frame = aligned_frames.get_color_frame()
         color_intrinsics = color_frame.get_profile().as_video_stream_profile().get_intrinsics()
@@ -153,6 +156,7 @@ class L515(CameraBase):
         assert len(streaming_data["depth"]) == len(streaming_data["color"]) == len(streaming_data["timestamp_ms"])
         np.savetxt(os.path.join(save_path, "intrinsics.txt"), self.color_intrinsics, fmt="%.16f")
         np.savetxt(os.path.join(save_path, "depth_scale.txt"), [self.depth_scale], fmt="%.16f")
+        np.savetxt(os.path.join(save_path, "depth2color.txt"), self.depth2color, fmt="%.16f")
         np.save(os.path.join(save_path, "timestamps.npy"), np.array(streaming_data["timestamp_ms"], dtype=float))
         if len(streaming_data["timestamp_ms"]) > 1:
             freq = len(streaming_data["timestamp_ms"]) / (streaming_data["timestamp_ms"][-1] - streaming_data["timestamp_ms"][0])
