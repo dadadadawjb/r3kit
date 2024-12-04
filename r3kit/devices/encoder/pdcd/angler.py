@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Union, Optional
 import struct
 import time
 import gc
@@ -59,12 +59,13 @@ def crc16(hex_num):
 
 
 class Angler(EncoderBase):
-    def __init__(self, id:str=ANGLER_ID, index:int=ANGLER_INDEX, fps:int=ANGLER_FPS, 
+    def __init__(self, id:str=ANGLER_ID, index:List[int]=ANGLER_INDEX, fps:int=ANGLER_FPS, 
                  baudrate:int=ANGLER_BAUDRATE, gap:float=ANGLER_GAP, name:str='Angler') -> None:
         super().__init__(name=name)
 
         self._id = id
         self._index = index
+        self._num = len(index)
         self._fps = fps
         self._baudrate = baudrate
         self._gap = gap
@@ -78,38 +79,36 @@ class Angler(EncoderBase):
 
         # config
         self.angle_dtype = np.dtype(np.float64)
-        self.angle_shape = (1,)
+        self.angle_shape = (self._num,)
 
         # stream
         self.in_streaming = Event()
     
-    def _read(self) -> Optional[Dict[str, float]]:
+    def _read(self) -> Dict[str, Union[np.ndarray, float]]:
         self.ser.flushInput()
 
-        sendbytes = str(self._index).zfill(2) + " 03 00 41 00 03"
-        crc, crc_H, crc_L = crc16(sendbytes)
-        sendbytes = sendbytes + ' ' + crc_L + ' ' + crc_H
-        sendbytes = bytes.fromhex(sendbytes)
-        self.ser.write(sendbytes)
-        receive_time = time.time() * 1000
-        time.sleep(self._gap)
-        re = self.ser.read(11)
-        if self.ser.inWaiting() > 0:
-            se = self.ser.read_all()
-            re += se
+        for i in range(self._num):
+            sendbytes = str(self._index[i]).zfill(2) + " 03 00 41 00 01"
+            crc, crc_H, crc_L = crc16(sendbytes)
+            sendbytes = sendbytes + ' ' + crc_L + ' ' + crc_H
+            sendbytes = bytes.fromhex(sendbytes)
+            self.ser.write(sendbytes)
+            time.sleep(self._gap)
         
-        receive = False
-        ret = 0
-        for b in range(len(re) - 10):
-            if re[b + 1] == 3 and re[b + 2] == 6 and re[b] == self._index:
-                angle = 360 * (re[b + 3] * 256 + re[b + 4]) / 4096
-                ret = angle
-                receive = True
-        if not receive:
-            return None
+        re = self.ser.read(7 * self._num)
+        receive_time = time.time() * 1000
+        
+        not_received = set(self._index)
+        ret = np.zeros(self._num)
+        for i in range(self._num):
+            rei = re[7*i:7*(i+1)]
+            assert (rei[0] in not_received) and (rei[1] == 3) and (rei[2] == 2)
+            not_received.remove(rei[0])
+            angle = 360 * (rei[3] * 256 + rei[4]) / 4096
+            ret[self._index.index(rei[0])] = angle
         return {'angle': ret, 'timestamp_ms': receive_time}
     
-    def get(self) -> Optional[Dict[str, float]]:
+    def get(self) -> Dict[str, Union[np.ndarray, float]]:
         if not self.in_streaming.is_set():
             data = self._read()
         else:
@@ -122,21 +121,20 @@ class Angler(EncoderBase):
             elif hasattr(self, "streaming_array"):
                 data = {}
                 with self.streaming_lock:
-                    data['angle'] = self.streaming_array["angle"].item()
+                    data['angle'] = np.copy(self.streaming_array["angle"])
                     data['timestamp_ms'] = self.streaming_array["timestamp_ms"].item()
             else:
                 raise AttributeError
         return data
     
-    def get_mean_data(self, n=10, name='angle') -> float:
+    def get_mean_data(self, n=10, name='angle') -> np.ndarray:
         assert name in ['angle'], 'name must be one of [angle]'
         tare_list = []
         count = 0
         while count < n:
             data = self.get()
-            if data is not None:
-                tare_list.append(data[name])
-                count += 1
+            tare_list.append(data[name])
+            count += 1
         tare = sum(tare_list) / n
         return tare
     
@@ -177,7 +175,7 @@ class Angler(EncoderBase):
         self.thread = Thread(target=partial(self._streaming_data, callback=callback), daemon=True)
         self.thread.start()
     
-    def stop_streaming(self) -> Dict[str, List[float]]:
+    def stop_streaming(self) -> Dict[str, Union[List[np.ndarray], List[float]]]:
         self.in_streaming.clear()
         self.thread.join()
         if hasattr(self, "streaming_data"):
@@ -190,7 +188,7 @@ class Angler(EncoderBase):
             del self.streaming_mutex
         elif hasattr(self, "streaming_array"):
             streaming_data = {
-                "angle": [self.streaming_array["angle"].item()], 
+                "angle": [np.copy(self.streaming_array["angle"])], 
                 "timestamp_ms": [self.streaming_array["timestamp_ms"].item()]
             }
             self.streaming_memory.close()
@@ -222,14 +220,14 @@ class Angler(EncoderBase):
         assert (not self.in_streaming.is_set()) or (not self._collect_streaming_data)
         self._shm = shm
     
-    def get_streaming(self) -> Dict[str, List[float]]:
+    def get_streaming(self) -> Dict[str, Union[List[np.ndarray], List[float]]]:
         # NOTE: only valid for non-custom-callback
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
         elif hasattr(self, "streaming_array"):
             streaming_data = {
-                "angle": [self.streaming_array["angle"].item()], 
+                "angle": [np.copy(self.streaming_array["angle"])], 
                 "timestamp_ms": [self.streaming_array["timestamp_ms"].item()]
             }
         else:
@@ -280,27 +278,26 @@ class Angler(EncoderBase):
     def _streaming_data(self, callback:Optional[callable]=None):
         while self.in_streaming.is_set():
             # fps
-            time.sleep(1/self._fps)
+            time.sleep(1/self._fps - self._gap * self._num)
 
             # get data
             if not self._collect_streaming_data:
                 continue
             data = self._read()
-            if data is not None:
-                if callback is None:
-                    if hasattr(self, "streaming_data"):
-                        self.streaming_mutex.acquire()
-                        self.streaming_data['angle'].append(data['angle'])
-                        self.streaming_data['timestamp_ms'].append(data['timestamp_ms'])
-                        self.streaming_mutex.release()
-                    elif hasattr(self, "streaming_array"):
-                        with self.streaming_lock:
-                            self.streaming_array["angle"][:] = data['angle']
-                            self.streaming_array["timestamp_ms"][:] = data['timestamp_ms']
-                    else:
-                        raise AttributeError
+            if callback is None:
+                if hasattr(self, "streaming_data"):
+                    self.streaming_mutex.acquire()
+                    self.streaming_data['angle'].append(data['angle'])
+                    self.streaming_data['timestamp_ms'].append(data['timestamp_ms'])
+                    self.streaming_mutex.release()
+                elif hasattr(self, "streaming_array"):
+                    with self.streaming_lock:
+                        self.streaming_array["angle"][:] = data['angle'][:]
+                        self.streaming_array["timestamp_ms"][:] = data['timestamp_ms']
                 else:
-                    callback(deepcopy(data))
+                    raise AttributeError
+            else:
+                callback(deepcopy(data))
     
     @staticmethod
     def raw2angle(raw:np.ndarray) -> np.ndarray:
@@ -321,7 +318,7 @@ class Angler(EncoderBase):
 
 
 if __name__ == "__main__":
-    encoder = Angler(id='/dev/ttyUSB0', index=2, baudrate=115200, fps=30, gap=0.002, name='Angler')
+    encoder = Angler(id='/dev/ttyUSB0', index=[2], baudrate=115200, fps=30, gap=0.002, name='Angler')
     streaming = False
     shm = False
 
