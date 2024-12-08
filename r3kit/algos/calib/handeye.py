@@ -19,13 +19,13 @@ class HandEyeCalibor(object):
     def set_camera_intrinsics(self, mtx:np.ndarray, image_size:np.ndarray) -> None:
         '''
         mtx: [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
-        image_size: [w, h]
+        image_size: [h, w]
         '''
         self.ext_calibor.set_camera_intrinsics(mtx, image_size)
     
     def add_image_pose(self, img:np.ndarray, pose:np.ndarray, vis:bool=True) -> bool:
         '''
-        img: the image of chessboard in [0, 255] BGR
+        img: the image of chessboard in [0, 255] (h, w, 3) BGR
         pose: 4x4 transformation matrix from robot base to gripper
         '''
         ret = self.ext_calibor.add_image(img, vis)
@@ -40,13 +40,14 @@ class HandEyeCalibor(object):
         '''
         w2c = self.ext_calibor.run()
         if w2c is not None:
-            R_b2w, t_b2w, R_g2c, t_g2c = cv2.calibrateRobotWorldHandEye(w2c[:, :3, :3], w2c[:, :3, 3], self.b2g[:, :3, :3], self.b2g[:, :3, 3])
+            R_b2w, t_b2w, R_g2c, t_g2c = cv2.calibrateRobotWorldHandEye(w2c[:, :3, :3], w2c[:, :3, 3], 
+                                                                        np.array(self.b2g)[:, :3, :3], np.array(self.b2g)[:, :3, 3])
             b2w = np.eye(4)
             b2w[:3, :3] = R_b2w
-            b2w[:3, 3] = t_b2w
+            b2w[:3, 3:] = t_b2w
             g2c = np.eye(4)
             g2c[:3, :3] = R_g2c
-            g2c[:3, 3] = t_g2c
+            g2c[:3, 3:] = t_g2c
             return (b2w, g2c)
         else:
             return (None, None)
@@ -68,7 +69,7 @@ if __name__ == '__main__':
     calibor = HandEyeCalibor(marker_type=args.marker_type, ext_calib_params=ext_calib_params)
     
     camera_mtx = np.load(os.path.join(args.data_dir, 'camera_mtx.npy'))
-    image_size = (1280, 1024)
+    image_size = (1024, 1280)
     calibor.set_camera_intrinsics(camera_mtx, image_size)
 
     b2g = np.load(os.path.join(args.data_dir, 'b2g.npy'))

@@ -29,14 +29,14 @@ class ChessboardExtCalibor(object):
     def set_camera_intrinsics(self, mtx:np.ndarray, image_size:np.ndarray) -> None:
         '''
         mtx: [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
-        image_size: [w, h]
+        image_size: [h, w]
         '''
         self.mtx = mtx
         self.image_size = image_size
     
     def add_image(self, img:np.ndarray, vis:bool=True) -> bool:
         '''
-        img: the image of chessboard in [0, 255] BGR
+        img: the image of chessboard in [0, 255] (h, w, 3) BGR
         ret: whether detected
         '''
         assert img.shape[:2] == self.image_size, f'Image size {img.shape[:2]} does not match the camera intrinsics {self.image_size}'
@@ -59,7 +59,7 @@ class ChessboardExtCalibor(object):
         '''
         w2c: Nx4x4 transformation matrices from world to camera in the detected added order
         '''
-        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(self.obj_points, self.img_points, self.image_size, self.mtx, None)
+        ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(self.obj_points, self.img_points, self.image_size[::-1], self.mtx, None)
         if ret:
             w2c = []
             for i in range(len(rvecs)):
@@ -84,7 +84,7 @@ if __name__ == '__main__':
     calibor = ChessboardExtCalibor(pattern_size=(11, 8), square_size=15)
     
     camera_mtx = np.load(os.path.join(args.data_dir, 'camera_mtx.npy'))
-    image_size = (1280, 1024)
+    image_size = (1024, 1280)
     calibor.set_camera_intrinsics(camera_mtx, image_size)
 
     for img_path in img_paths:
