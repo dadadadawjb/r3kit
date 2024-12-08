@@ -80,23 +80,26 @@ class ContextObject(object):
         return self
 
     def __del__(self) -> None:
-        if self.default_action_set is not None:
-            xr.destroy_action_set(self.default_action_set)
-            self.default_action_set = None
-        if self.space is not None:
-            xr.destroy_space(self.space)
-            self.space = None
-        if self.session is not None:
-            xr.destroy_session(self.session)
-            self.session = None
-        if self.graphics is not None:
-            self.graphics.destroy()
-            self.graphics = None
-        if self.instance is not None:
-            xr.destroy_instance(self.instance)
-            self.instance = None
-
-    def frame_loop(self):
+        try:
+            if self.default_action_set is not None:
+                xr.destroy_action_set(self.default_action_set)
+                self.default_action_set = None
+            if self.space is not None:
+                xr.destroy_space(self.space)
+                self.space = None
+            if self.session is not None:
+                xr.destroy_session(self.session)
+                self.session = None
+            if self.graphics is not None:
+                self.graphics.destroy()
+                self.graphics = None
+            if self.instance is not None:
+                xr.destroy_instance(self.instance)
+                self.instance = None
+        except Exception as e:
+            pass
+    
+    def attach_session_action_sets(self):
         xr.attach_session_action_sets(
             session=self.session,
             attach_info=xr.SessionActionSetsAttachInfo(
@@ -106,6 +109,8 @@ class ContextObject(object):
                 )
             ),
         )
+
+    def frame_loop(self):
         while True:
             self.exit_render_loop = False
             self.poll_xr_events()
@@ -313,6 +318,7 @@ if __name__ == '__main__':
     print(*vive_tracker_paths)
 
     # Loop over the render frames
+    context.attach_session_action_sets()
     session_was_focused = False  # Check for a common problem
     for frame_index, frame_state in enumerate(context.frame_loop()):
         # print(context.session_state)
