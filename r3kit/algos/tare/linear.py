@@ -1,26 +1,10 @@
 from typing import Dict, Union
 import numpy as np
 
-
-class LinearTarer(object):
-    def __init__(self) -> None:
-        self.A_list = []
-        self.b_list = []
-
-    def add_A(self, A:np.ndarray) -> None:
-        self.A_list.append(A)
-    
-    def add_b(self, b:np.ndarray) -> None:
-        self.b_list.append(b)
-    
-    def run(self) -> np.ndarray:
-        A = np.concatenate(self.A_list, axis=0)
-        B = np.concatenate(self.b_list, axis=0)
-        X, residuals, rank, s = np.linalg.lstsq(A, B, rcond=None)
-        return X
+from r3kit.algos.lstsq import LinearSolver
 
 
-class LinearMFTarer(LinearTarer):
+class LinearMFTarer(LinearSolver):
     G_VALUE:float = -9.8
     G_VECTOR:np.ndarray = np.array([[0], [0], [G_VALUE]])
 
@@ -44,7 +28,7 @@ class LinearMFTarer(LinearTarer):
             'f0': X[1:4]
         }
 
-class LinearFTarer(LinearTarer):
+class LinearFTarer(LinearSolver):
     G_VALUE:float = -9.8
     G_VECTOR:np.ndarray = np.array([[0], [0], [G_VALUE]])
 
@@ -70,7 +54,7 @@ class LinearFTarer(LinearTarer):
             'f0': X[0:3]
         }
 
-class LinearCTTarer(LinearTarer):
+class LinearCTTarer(LinearSolver):
     G_VALUE:float = -9.8
     G_VECTOR:np.ndarray = np.array([[0], [0], [G_VALUE]])
 

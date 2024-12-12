@@ -87,22 +87,23 @@ def draw_items(items:np.ndarray, path:str) -> None:
         plt.savefig(path)
 
 
-def save_img(idx:int, path:str, frame_list:List[np.ndarray], suffix:str='png', normalize:bool=False) -> None:
+def save_img(idx:int, path:str, frame:np.ndarray, suffix:str='png', normalize:bool=False, idx_bias:int=0) -> None:
     if normalize:
-        cv2.imwrite(os.path.join(path, f"{str(idx).zfill(16)}.{suffix}"), ((frame_list[idx] - frame_list[idx].min()) / (frame_list[idx].max() - frame_list[idx].min()) * 255).astype(np.uint8))
+        cv2.imwrite(os.path.join(path, f"{str(idx+idx_bias).zfill(16)}.{suffix}"), ((frame - frame.min()) / (frame.max() - frame.min()) * 255).astype(np.uint8))
     else:
-        cv2.imwrite(os.path.join(path, f"{str(idx).zfill(16)}.{suffix}"), frame_list[idx])
+        cv2.imwrite(os.path.join(path, f"{str(idx+idx_bias).zfill(16)}.{suffix}"), frame)
 
-def save_imgs(path:str, frame_list:List[np.ndarray], suffix:str='png', normalize:bool=False) -> None:
+def save_imgs(path:str, frame_list:List[np.ndarray], suffix:str='png', normalize:bool=False, idx_bias:int=0) -> None:
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = [
             executor.submit(
                 save_img,
                 idx,
                 path,
-                frame_list,
+                frame_list[idx],
                 suffix,
-                normalize
+                normalize,
+                idx_bias
             )
             for idx in range(len(frame_list))
         ]

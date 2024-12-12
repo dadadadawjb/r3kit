@@ -1,17 +1,18 @@
 import os
+import shutil
 from typing import Tuple, List, Union, Dict, Optional
 import time
 import gc
 import numpy as np
 import cv2
 from scipy.spatial.transform import Rotation as Rot
-from threading import Lock
+from threading import Lock, Thread
 from multiprocessing import shared_memory, Manager
 import pyrealsense2 as rs
 
 from r3kit.devices.camera.base import CameraBase
 from r3kit.devices.camera.realsense.config import *
-from r3kit.utils.vis import draw_time, save_imgs
+from r3kit.utils.vis import draw_time, save_imgs, save_img
 
 
 class T265(CameraBase):
@@ -124,6 +125,13 @@ class T265(CameraBase):
                         "right": [], 
                         "timestamp_ms": [], 
                     }
+                    # TODO: ugly realtime write
+                    self._write_flag = True
+                    self._write_idx = 0
+                    if os.path.exists(f'./.temp/{self.name}'):
+                        shutil.rmtree(f'./.temp/{self.name}')
+                    self._image_streaming_data_writer = Thread(target=self._write_image_streaming_data, args=(f'./.temp/{self.name}',))
+                    self._image_streaming_data_writer.start()
                 self.pose_streaming_mutex = Lock()
                 self.pose_streaming_data = {
                     "xyz": [], 
@@ -179,6 +187,10 @@ class T265(CameraBase):
             del self.pose_streaming_data
             del self.pose_streaming_mutex
             if self._image:
+                # TODO: ugly realtime write
+                self._write_flag = False
+                self._image_streaming_data_writer.join()
+
                 streaming_data['image'] = self.image_streaming_data
                 self.image_streaming_data = {
                     "left": [], 
@@ -218,7 +230,11 @@ class T265(CameraBase):
     
     def save_streaming(self, save_path:str, streaming_data:dict) -> None:
         if self._image:
-            assert len(streaming_data["image"]["left"]) == len(streaming_data["image"]["right"]) == len(streaming_data["image"]["timestamp_ms"])
+            has_writer = os.path.exists(f'./.temp/{self.name}')
+            if not has_writer:
+                assert len(streaming_data["image"]["left"]) == len(streaming_data["image"]["right"]) == len(streaming_data["image"]["timestamp_ms"])
+            else:
+                assert len(streaming_data["image"]["left"]) + self._write_idx == len(streaming_data["image"]["right"]) + self._write_idx == len(streaming_data["image"]["timestamp_ms"])
             os.makedirs(os.path.join(save_path, 'image'), exist_ok=True)
             np.save(os.path.join(save_path, 'image', "timestamps.npy"), np.array(streaming_data["image"]["timestamp_ms"], dtype=float))
             if len(streaming_data["image"]["timestamp_ms"]) > 1:
@@ -228,8 +244,14 @@ class T265(CameraBase):
                 freq = 0
             os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
             os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
-            save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"])
-            save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"])
+            idx_bias = 0
+            if has_writer:
+                os.rename(os.path.join(f'./.temp/{self.name}', 'left'), os.path.join(save_path, 'image', 'left'))
+                os.rename(os.path.join(f'./.temp/{self.name}', 'right'), os.path.join(save_path, 'image', 'right'))
+                idx_bias = self._write_idx
+                shutil.rmtree(f'./.temp/{self.name}')
+            save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"], idx_bias=idx_bias)
+            save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"], idx_bias=idx_bias)
         assert len(streaming_data["pose"]["xyz"]) == len(streaming_data["pose"]["quat"]) == len(streaming_data["pose"]["timestamp_ms"])
         os.makedirs(os.path.join(save_path, 'pose'), exist_ok=True)
         np.save(os.path.join(save_path, 'pose', "timestamps.npy"), np.array(streaming_data["pose"]["timestamp_ms"], dtype=float))
@@ -240,6 +262,26 @@ class T265(CameraBase):
             freq = 0
         np.save(os.path.join(save_path, 'pose', "xyz.npy"), np.array(streaming_data["pose"]["xyz"], dtype=float))
         np.save(os.path.join(save_path, 'pose', "quat.npy"), np.array(streaming_data["pose"]["quat"], dtype=float))
+    
+    def _write_image_streaming_data(self, save_path:str) -> None:
+        os.makedirs(save_path, exist_ok=True)
+        os.makedirs(os.path.join(save_path, 'left'), exist_ok=True)
+        os.makedirs(os.path.join(save_path, 'right'), exist_ok=True)
+        while True:
+            if not self._write_flag:
+                break
+
+            to_write = False
+            self.image_streaming_mutex.acquire()
+            if len(self.image_streaming_data["left"]) > 0:
+                to_write = True
+                left_img = self.image_streaming_data["left"].pop(0)
+                right_img = self.image_streaming_data["right"].pop(0)
+            self.image_streaming_mutex.release()
+            if to_write:
+                save_img(self._write_idx, os.path.join(save_path, 'left'), left_img)
+                save_img(self._write_idx, os.path.join(save_path, 'right'), right_img)
+                self._write_idx += 1
     
     def collect_streaming(self, collect:bool=True) -> None:
         # NOTE: only valid for no-custom-callback
@@ -256,6 +298,10 @@ class T265(CameraBase):
         if hasattr(self, "pose_streaming_data"):
             streaming_data = {'pose': self.pose_streaming_data}
             if self._image:
+                # TODO: ugly realtime write
+                self._write_flag = False
+                self._image_streaming_data_writer.join()
+
                 streaming_data['image'] = self.image_streaming_data
         elif hasattr(self, "pose_streaming_array"):
             streaming_data = {'pose': {
@@ -278,6 +324,10 @@ class T265(CameraBase):
         assert not self._collect_streaming_data
         if hasattr(self, "pose_streaming_data"):
             if self._image:
+                # TODO: ugly realtime write
+                self._write_flag = False
+                self._image_streaming_data_writer.join()
+
                 self.image_streaming_data['left'].clear()
                 self.image_streaming_data['right'].clear()
                 self.image_streaming_data['timestamp_ms'].clear()
@@ -313,6 +363,13 @@ class T265(CameraBase):
                     "right": [], 
                     "timestamp_ms": [], 
                 }
+                # TODO: ugly realtime write
+                self._write_flag = True
+                self._write_idx = 0
+                if os.path.exists(f'./.temp/{self.name}'):
+                    shutil.rmtree(f'./.temp/{self.name}')
+                self._image_streaming_data_writer = Thread(target=self._write_image_streaming_data, args=(f'./.temp/{self.name}',))
+                self._image_streaming_data_writer.start()
             self.pose_streaming_mutex = Lock()
             self.pose_streaming_data = {
                 "xyz": [], 
