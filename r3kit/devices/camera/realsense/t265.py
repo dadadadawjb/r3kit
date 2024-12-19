@@ -242,14 +242,19 @@ class T265(CameraBase):
                 draw_time(streaming_data["image"]["timestamp_ms"], os.path.join(save_path, 'image', f"freq_{freq}.png"))
             else:
                 freq = 0
-            os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
-            os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
+            # os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
+            # os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
             idx_bias = 0
             if has_writer:
-                os.rename(os.path.join(f'./.temp/{self.name}', 'left'), os.path.join(save_path, 'image', 'left'))
-                os.rename(os.path.join(f'./.temp/{self.name}', 'right'), os.path.join(save_path, 'image', 'right'))
+                # os.rename(os.path.join(f'./.temp/{self.name}', 'left'), os.path.join(save_path, 'image', 'left'))
+                # os.rename(os.path.join(f'./.temp/{self.name}', 'right'), os.path.join(save_path, 'image', 'right'))
+                shutil.move(os.path.join(f'./.temp/{self.name}', 'left'), os.path.join(save_path, 'image', 'left'))
+                shutil.move(os.path.join(f'./.temp/{self.name}', 'right'), os.path.join(save_path, 'image', 'right'))
                 idx_bias = self._write_idx
                 shutil.rmtree(f'./.temp/{self.name}')
+            else:
+                os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
+                os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
             save_imgs(os.path.join(save_path, 'image', 'left'), streaming_data["image"]["left"], idx_bias=idx_bias)
             save_imgs(os.path.join(save_path, 'image', 'right'), streaming_data["image"]["right"], idx_bias=idx_bias)
         assert len(streaming_data["pose"]["xyz"]) == len(streaming_data["pose"]["quat"]) == len(streaming_data["pose"]["timestamp_ms"])

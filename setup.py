@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name = 'r3kit', 
-    version = '0.0.0', 
+    version = '0.0.1', 
     license = 'MIT', 
     description = 'Research kits for real robots', 
     author = "Junbo Wang", 

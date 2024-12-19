@@ -2,8 +2,8 @@ import pyrealsense2 as rs
 
 L515_ID = 'f0172289'
 L515_STREAMS = [
-    (rs.stream.depth, 1024, 768, rs.format.z16, 30), 
-    (rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    (rs.stream.depth, 640, 480, rs.format.z16, 30), 
+    (rs.stream.color, 960, 540, rs.format.bgr8, 15)
 ]
 
 T265_ID = '230222110234'
@@ -15,6 +15,6 @@ T265_STREAMS = [
 
 D415_ID = '104122063633'
 D415_STREAMS = [
-    (rs.stream.depth, 1280, 720, rs.format.z16, 30), 
-    (rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    (rs.stream.depth, 640, 480, rs.format.z16, 15), 
+    (rs.stream.color, 640, 480, rs.format.bgr8, 15)
 ]

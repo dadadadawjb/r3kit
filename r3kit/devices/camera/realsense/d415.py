@@ -204,16 +204,23 @@ class D415(CameraBase):
             draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
         else:
             freq = 0
-        os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
-        if self._depth:
-            os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
+        # os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
+        # if self._depth:
+        #     os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
         idx_bias = 0
         if has_writer:
-            os.rename(os.path.join(f'./.temp/{self.name}', 'color'), os.path.join(save_path, 'color'))
+            # os.rename(os.path.join(f'./.temp/{self.name}', 'color'), os.path.join(save_path, 'color'))
+            # if self._depth:
+            #     os.rename(os.path.join(f'./.temp/{self.name}', 'depth'), os.path.join(save_path, 'depth'))
+            shutil.move(os.path.join(f'./.temp/{self.name}', 'color'), os.path.join(save_path, 'color'))
             if self._depth:
-                os.rename(os.path.join(f'./.temp/{self.name}', 'depth'), os.path.join(save_path, 'depth'))
+                shutil.move(os.path.join(f'./.temp/{self.name}', 'depth'), os.path.join(save_path, 'depth'))
             idx_bias = self._write_idx
             shutil.rmtree(f'./.temp/{self.name}')
+        else:
+            os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
+            if self._depth:
+                os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
         save_imgs(os.path.join(save_path, 'color'), streaming_data["color"], idx_bias=idx_bias)
         if self._depth:
             save_imgs(os.path.join(save_path, 'depth'), streaming_data["depth"], idx_bias=idx_bias)

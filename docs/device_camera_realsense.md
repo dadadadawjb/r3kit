@@ -1,4 +1,7 @@
 # RealSense Camera Device
+## ID
+Use `realsense-viewer` to get the device serial number.
+
 ## Compatibility
 * D415 cannot be connected with USB2
 * L515 cannot be connected with USB2

@@ -15,19 +15,10 @@ pip install -e .
 Additional manual dependencies (see `docs` to set up): 
 * Franka Robot: `rt-linux`
 * Flexiv Robot: `flexivrdk`
-* VIVE Camera: `SteamVR` and `VIVE_Streaming_Hub`
+* VIVE Camera: `SteamVR` and `VIVE_Hub`
 
 ## Usage
 ```python
-import r3kit
-from r3kit.devices.robot.franka.panda import Panda
-
-robot = Panda()
-joints = robot.joint_read()
-```
-
-```python
-import r3kit
 from r3kit.devices.camera.realsense.l515 import L515
 
 camera = L515()
@@ -35,15 +26,27 @@ image = camera.get()
 ```
 
 ```python
-import r3kit
 from r3kit.devices.ftsensor.ati.pyati import PyATI
 
 ftsensor = PyATI()
-data = ftsensor.get()
+ft = ftsensor.get()
 ```
 
 ```python
-import r3kit
+from r3kit.devices.encoder.pdcd.angler import Angler
+
+encoder = Angler()
+angle = encoder.get()
+```
+
+```python
+from r3kit.devices.robot.flexiv.rizon import Rizon
+
+robot = Rizon()
+joints = robot.joint_read()
+```
+
+```python
 from r3kit.algos.calib.chessboard import ChessboardExtCalibor
 
 calibor = ChessboardExtCalibor()
@@ -52,7 +55,6 @@ w2c = calibor.run()
 ```
 
 ```python
-import r3kit
 from r3kit.algos.tare.linear import LinearMFTarer
 
 tarer = LinearMFTarer()

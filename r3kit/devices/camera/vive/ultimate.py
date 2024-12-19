@@ -23,10 +23,10 @@ from r3kit.utils.vis import draw_time
 
 
 class Ultimate(CameraBase):
-    def __init__(self, role:List[str]=ULTIMATE_ROLE, fps:int=ULTIMATE_FPS, name:str='Ultimate') -> None:
+    def __init__(self, id:List[str]=ULTIMATE_ROLE, fps:int=ULTIMATE_FPS, name:str='Ultimate') -> None:
         super().__init__(name=name)
 
-        self._num = len(role)
+        self._num = len(id)
         self._fps = fps
 
         # create shared context object
@@ -35,7 +35,7 @@ class Ultimate(CameraBase):
                 enabled_extension_names=ULTIMATE_EXTENSION_NAMES,
             ),
         )
-        self.roles = role
+        self.roles = id
         self.instance = self.context.instance
         self.session = self.context.session
         # Save the function pointer

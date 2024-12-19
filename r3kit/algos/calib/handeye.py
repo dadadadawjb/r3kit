@@ -16,13 +16,6 @@ class HandEyeCalibor(object):
         
         self.b2g = []
     
-    def set_camera_intrinsics(self, mtx:np.ndarray, image_size:np.ndarray) -> None:
-        '''
-        mtx: [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
-        image_size: [h, w]
-        '''
-        self.ext_calibor.set_camera_intrinsics(mtx, image_size)
-    
     def add_image_pose(self, img:np.ndarray, pose:np.ndarray, vis:bool=True) -> bool:
         '''
         img: the image of chessboard in [0, 255] (h, w, 3) BGR
@@ -67,10 +60,6 @@ if __name__ == '__main__':
     
     ext_calib_params = {'pattern_size': (11, 8), 'square_size': 15}
     calibor = HandEyeCalibor(marker_type=args.marker_type, ext_calib_params=ext_calib_params)
-    
-    camera_mtx = np.load(os.path.join(args.data_dir, 'camera_mtx.npy'))
-    image_size = (1024, 1280)
-    calibor.set_camera_intrinsics(camera_mtx, image_size)
 
     b2g = np.load(os.path.join(args.data_dir, 'b2g.npy'))
     for idx, img_path in enumerate(img_paths):
