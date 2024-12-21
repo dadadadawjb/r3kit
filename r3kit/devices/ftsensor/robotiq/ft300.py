@@ -130,7 +130,7 @@ class FT300(FTSensorBase):
         except Exception as e:
             print(f'An error occurred: {e}')
         self.ser = serial.Serial(
-            port=FT300_ID, baudrate=FT300_BAUDRATE, bytesize=8, parity="N", stopbits=1)
+            port=self._id, baudrate=FT300_BAUDRATE, bytesize=8, parity="N", stopbits=1)
         # Read serial buffer until founding the bytes [0x20,0x4e]
         self.ser.reset_input_buffer()
         # Ignore first several values and get value for zero ft in the end
