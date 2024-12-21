@@ -59,8 +59,8 @@ class FT300(FTSensorBase):
     def __del__(self):
         if self.in_streaming.is_set():
             for i in range(50):
-                self.ser.write([0xff])
-            self.ser.close()
+                self._ser.write([0xff])
+            self._ser.close()
         else:
             self._client.close()
     
@@ -129,13 +129,12 @@ class FT300(FTSensorBase):
             self._client.write_registers(address=FT300_REGISTER_DICT['Stream'], values=FT300_STREAM_FLAG, slave=9)
         except Exception as e:
             print(f'An error occurred: {e}')
-        self.ser = serial.Serial(
-            port=self._id, baudrate=FT300_BAUDRATE, bytesize=8, parity="N", stopbits=1)
+        self._ser = self._client.socket
         # Read serial buffer until founding the bytes [0x20,0x4e]
-        self.ser.reset_input_buffer()
+        self._ser.reset_input_buffer()
         # Ignore first several values and get value for zero ft in the end
         for i in range(10):
-            self.ser.read_until(FT300_STREAM_START)
+            self._ser.read_until(FT300_STREAM_START)
         self.thread = Thread(target=partial(self._streaming_data, callback=callback), daemon=True)
         self.thread.start()
     
@@ -143,8 +142,7 @@ class FT300(FTSensorBase):
         self.in_streaming.clear()
         self.thread.join()
         for i in range(50):
-            self.ser.write([0xff])
-        self.ser.close()
+            self._ser.write([0xff])
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
             self.streaming_data = {
@@ -250,7 +248,7 @@ class FT300(FTSensorBase):
             # get data
             if not self._collect_streaming_data:
                 continue
-            raw_bytes = bytearray(self.ser.read_until(FT300_STREAM_START))
+            raw_bytes = bytearray(self._ser.read_until(FT300_STREAM_START))
             receive_time = time.time() * 1000
             ft = [int.from_bytes(
                 raw_bytes[i*2: i*2+2],
