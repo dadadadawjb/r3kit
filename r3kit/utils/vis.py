@@ -6,6 +6,7 @@ import cv2
 import matplotlib.pyplot as plt
 import concurrent
 import concurrent.futures
+from pynput import keyboard
 
 
 def vis_pc(xyz:np.ndarray, rgb:Optional[np.ndarray]=None, show_frame:bool=True) -> None:
@@ -118,3 +119,274 @@ def save_video(path:str, frame_list:List[np.ndarray], fps:int=30) -> None:
     for frame in frame_list:
         out.write(frame)
     out.release()
+
+
+class Sequence1DVisualizer:
+    def __init__(self, left:int=0, top:int=0) -> None:
+        self.items = {}
+        self.left = left
+        self.top = top
+        self.left_init = left
+        self.top_init = top
+        self.colors = ['tab:red', 'tab:green', 'tab:blue', 'tab:orange', 'tab:purple', 'tab:pink', 'tab:cyan', 'tab:olive', 'tab:brown', 'tab:gray']
+        plt.ion()
+    
+    def __del__(self) -> None:
+        self.stop()
+    
+    def stop(self) -> None:
+        plt.ioff()
+        plt.close()
+    
+    def clear(self) -> None:
+        self.items.clear()
+        self.left = self.left_init
+        self.top = self.top_init
+
+    def update_item(self, name:str, item:np.ndarray, index:Optional[int]=None) -> None:
+        assert len(item.shape) == 1
+        if name in self.items:
+            x = self.items[name]['x']
+            ys = self.items[name]['ys']
+            lines, fig, ax = self.items[name]['object']
+            if index is None or index >= len(x):
+                x.append(len(x))
+                for i in range(item.shape[0]):
+                    ys[i].append(item[i])
+                    lines[i].set_xdata(x)
+                    lines[i].set_ydata(ys[i])
+            else:
+                x = x[:index+1]
+                for i in range(item.shape[0]):
+                    ys[i] = ys[i][:index+1]
+                    ys[i][index] = item[i]
+                    lines[i].set_xdata(x[:index+1])
+                    lines[i].set_ydata(ys[i])
+            ax.relim()
+            ax.autoscale_view()
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+            self.items[name]['x'] = x
+            self.items[name]['ys'] = ys
+        else:
+            fig, ax = plt.subplots(figsize=(3.2, 2.4), dpi=100)
+            fig.canvas.manager.set_window_title(name)
+            fig.canvas.manager.window.wm_geometry(f"+{self.left}+{self.top}")
+            self.left += 320
+            x = []
+            ys = [[] for _ in range(item.shape[0])]
+            lines = []
+            for i in range(item.shape[0]):
+                line, = ax.plot([], [], color=self.colors[i % len(self.colors)], linestyle='-', label=f'{i}')
+                lines.append(line)
+            ax.legend()
+            self.items[name] = {'object': (lines, fig, ax), 'x': x, 'ys': ys}
+            self.update_item(name, item)
+
+
+class Sequence2DVisualizer:
+    def __init__(self, left:int=0, top:int=0) -> None:
+        self.names = []
+        self.left = left
+        self.top = top
+        self.left_init = left
+        self.top_init = top
+    
+    def __del__(self) -> None:
+        self.stop()
+    
+    def stop(self) -> None:
+        cv2.destroyAllWindows()
+    
+    def clear(self) -> None:
+        cv2.destroyAllWindows()
+        self.names.clear()
+        self.left = self.left_init
+        self.top = self.top_init
+    
+    def update_image(self, name:str, image:np.ndarray, type:str, **kwargs) -> None:
+        if type == 'rgb':
+            assert len(image.shape) == 3 and image.shape[2] == 3
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        elif type == 'gray':
+            assert len(image.shape) == 2
+        elif type == 'depth':
+            assert len(image.shape) == 2
+            image = (np.clip(image / kwargs['depth_max'], 0, 1) * 255).astype(np.uint8)
+            image = cv2.applyColorMap(image, cv2.COLORMAP_JET)
+        else:
+            raise NotImplementedError
+        
+        if name not in self.names:
+            cv2.namedWindow(name, cv2.WINDOW_AUTOSIZE)
+        cv2.imshow(name, image)
+        cv2.waitKey(1)
+        if name not in self.names:
+            cv2.moveWindow(name, self.left, self.top)
+            x, y, width, height = cv2.getWindowImageRect(name)
+            self.left += width * 2
+            self.names.append(name)
+
+
+class Sequence3DVisualizer:
+    def __init__(self, name:str='3D', width:int=1280, height:int=720, left:int=0, top:int=0) -> None:
+        self.visualizer = o3d.visualization.Visualizer()
+        self.visualizer.create_window(width=width, height=height, left=left, top=top, visible=True, window_name=name)
+
+        self.frames = {}
+        self.arrows = {}
+        self.points = {}
+        self.c2w = None
+    
+    def __del__(self) -> None:
+        self.stop()
+    
+    def stop(self) -> None:
+        self.visualizer.destroy_window()
+    
+    def clear(self) -> None:
+        self.visualizer.clear_geometries()
+        self.frames.clear()
+        self.arrows.clear()
+        self.points.clear()
+    
+    def update_frame(self, name:str, pose:Optional[np.ndarray]=None, size:Optional[float]=None) -> None:
+        if name in self.frames:
+            last_pose = self.frames[name]['pose']
+            last_size = self.frames[name]['size']
+            frame = self.frames[name]['object']
+
+            if not (size is None or np.allclose(size, last_size)):
+                frame.scale(size / last_size, center=last_pose[:3, 3])
+                self.frames[name]['size'] = size
+            if not (pose is None or np.allclose(pose, last_pose)):
+                frame.transform(pose @ np.linalg.inv(last_pose))
+                self.frames[name]['pose'] = pose
+            
+            self.visualizer.update_geometry(frame)
+        else:
+            assert pose is not None and size is not None
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=size, origin=[0, 0, 0])
+            frame.transform(pose)
+            self.frames[name] = {'object': frame, 'pose': pose, 'size': size}
+            self.visualizer.add_geometry(frame)
+    
+    def update_arrow(self, name:str, offset:Optional[np.ndarray]=None, direction:Optional[np.ndarray]=None, size:Optional[float]=None, color:Optional[np.ndarray]=None) -> None:
+        if name in self.arrows:
+            last_offset = self.arrows[name]['offset']
+            last_direction = self.arrows[name]['direction']
+            last_size = self.arrows[name]['size']
+            last_color = self.arrows[name]['color']
+            arrow = self.arrows[name]['object']
+
+            arrow.translate(-last_offset)
+            arrow.rotate(np.linalg.inv(rotation_vec2mat(last_direction)), center=[0, 0, 0])
+            arrow.scale(1 / last_size, center=[0, 0, 0])
+
+            if size is None:
+                size = last_size
+            arrow.scale(size, center=[0, 0, 0])
+            if direction is None:
+                direction = last_direction
+            arrow.rotate(rotation_vec2mat(direction), center=[0, 0, 0])
+            if offset is None:
+                offset = last_offset
+            arrow.translate(offset)
+            if color is None:
+                color = last_color
+            arrow.paint_uniform_color(color)
+
+            self.arrows[name]['offset'] = offset
+            self.arrows[name]['direction'] = direction
+            self.arrows[name]['size'] = size
+            self.arrows[name]['color'] = color
+            self.visualizer.update_geometry(arrow)
+        else:
+            assert offset is not None and direction is not None and size is not None and color is not None
+            arrow = o3d.geometry.TriangleMesh.create_arrow(cylinder_radius=0.025, cone_radius=0.05, cylinder_height=0.875, cone_height=0.125, 
+                                                           resolution=20, cylinder_split=4, cone_split=1)
+            arrow.paint_uniform_color(color)
+            arrow.scale(size, center=[0, 0, 0])
+            arrow.rotate(rotation_vec2mat(direction), center=[0, 0, 0])
+            arrow.translate(offset)
+            self.arrows[name] = {'object': arrow, 'offset': offset, 'direction': direction, 'size': size, 'color': color}
+            self.visualizer.add_geometry(arrow)
+    
+    def update_points(self, name:str, xyzs:Optional[np.ndarray]=None, rgbs:Optional[np.ndarray]=None) -> None:
+        if name in self.points:
+            if xyzs is not None:
+                points = self.points[name]['object']
+                points.points = o3d.utility.Vector3dVector(xyzs)
+            if rgbs is not None:
+                points = self.points[name]['object']
+                points.colors = o3d.utility.Vector3dVector(rgbs)
+            self.visualizer.update_geometry(points)
+        else:
+            assert xyzs is not None and rgbs is not None
+            points = o3d.geometry.PointCloud()
+            points.points = o3d.utility.Vector3dVector(xyzs)
+            points.colors = o3d.utility.Vector3dVector(rgbs)
+            self.points[name] = {'object': points}
+            self.visualizer.add_geometry(points)
+    
+    def update_view(self, c2w:Optional[np.ndarray]=None) -> None:
+        if c2w is None or (self.c2w is not None and np.allclose(c2w, self.c2w)):
+            pass
+        else:
+            view_control = self.visualizer.get_view_control()
+            params = view_control.convert_to_pinhole_camera_parameters()
+            params.extrinsic = np.linalg.inv(c2w)
+            view_control.convert_from_pinhole_camera_parameters(params, allow_arbitrary=True)
+            self.c2w = c2w
+
+        self.visualizer.poll_events()
+        self.visualizer.update_renderer()
+
+
+class SequenceKeyboardListener:
+    def __init__(self, verbose:bool=True) -> None:
+        self._verbose = verbose
+        self.quit = False
+        self.pause = False
+        self.forward = False
+        self.backward = False
+        self.speed = 1
+
+        self.listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
+        self.listener.start()
+    
+    def __del__(self) -> None:
+        self.stop()
+    
+    def stop(self) -> None:
+        self.listener.stop()
+    
+    def _on_press(self, key:keyboard.Key) -> None:
+        if key == keyboard.Key.esc:
+            self.quit = True
+            if self._verbose:
+                print('Quit')
+        elif key == keyboard.Key.space:
+            self.pause = not self.pause
+            if self._verbose:
+                print('Pause' if self.pause else 'Resume')
+        elif key == keyboard.Key.right:
+            self.forward = True
+            if self._verbose:
+                print('Forward')
+        elif key == keyboard.Key.left:
+            self.backward = True
+            if self._verbose:
+                print('Backward')
+        elif key == keyboard.Key.up:
+            self.speed *= 2
+            if self._verbose:
+                print(f'Speed: {self.speed}')
+        elif key == keyboard.Key.down:
+            self.speed //= 2
+            self.speed = max(1, self.speed)
+            if self._verbose:
+                print(f'Speed: {self.speed}')
+
+    def _on_release(self, key:keyboard.Key) -> None:
+        pass
