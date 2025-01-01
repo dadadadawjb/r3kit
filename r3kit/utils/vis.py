@@ -122,8 +122,10 @@ def save_video(path:str, frame_list:List[np.ndarray], fps:int=30) -> None:
 
 
 class Sequence1DVisualizer:
-    def __init__(self, left:int=0, top:int=0) -> None:
+    def __init__(self, width:int=640, height:int=480, left:int=0, top:int=0) -> None:
         self.items = {}
+        self.width = width
+        self.height = height
         self.left = left
         self.top = top
         self.left_init = left
@@ -143,25 +145,34 @@ class Sequence1DVisualizer:
         self.left = self.left_init
         self.top = self.top_init
 
-    def update_item(self, name:str, item:np.ndarray, index:Optional[int]=None) -> None:
+    def update_item(self, name:str, item:np.ndarray, index:Optional[int]=None, zero:bool=False) -> None:
         assert len(item.shape) == 1
         if name in self.items:
             x = self.items[name]['x']
             ys = self.items[name]['ys']
             lines, fig, ax = self.items[name]['object']
-            if index is None or index >= len(x):
-                x.append(len(x))
+            if index is None:
+                index = 0 if len(x) == 0 else x[-1] + 1
+            if len(x) == 0 or index > x[-1]:
+                x.append(index)
                 for i in range(item.shape[0]):
                     ys[i].append(item[i])
                     lines[i].set_xdata(x)
-                    lines[i].set_ydata(ys[i])
+                    if zero:
+                        lines[i].set_ydata(np.array(ys[i]) - ys[i][0])
+                    else:
+                        lines[i].set_ydata(ys[i])
             else:
-                x = x[:index+1]
+                end_idx = np.where(np.array(x) <= index)[0][-1]
+                x = x[:end_idx+1]
                 for i in range(item.shape[0]):
-                    ys[i] = ys[i][:index+1]
-                    ys[i][index] = item[i]
-                    lines[i].set_xdata(x[:index+1])
-                    lines[i].set_ydata(ys[i])
+                    ys[i] = ys[i][:end_idx+1]
+                    ys[i][end_idx] = item[i]
+                    lines[i].set_xdata(x)
+                    if zero:
+                        lines[i].set_ydata(np.array(ys[i]) - ys[i][0])
+                    else:
+                        lines[i].set_ydata(ys[i])
             ax.relim()
             ax.autoscale_view()
             fig.canvas.draw()
@@ -169,10 +180,10 @@ class Sequence1DVisualizer:
             self.items[name]['x'] = x
             self.items[name]['ys'] = ys
         else:
-            fig, ax = plt.subplots(figsize=(3.2, 2.4), dpi=100)
+            fig, ax = plt.subplots(figsize=(self.width/100, self.height/100), dpi=100)
             fig.canvas.manager.set_window_title(name)
             fig.canvas.manager.window.wm_geometry(f"+{self.left}+{self.top}")
-            self.left += 320
+            self.left += self.width
             x = []
             ys = [[] for _ in range(item.shape[0])]
             lines = []
@@ -204,10 +215,12 @@ class Sequence2DVisualizer:
         self.left = self.left_init
         self.top = self.top_init
     
-    def update_image(self, name:str, image:np.ndarray, type:str, **kwargs) -> None:
+    def update_image(self, name:str, image:np.ndarray, type:str, scale:float=1.0, **kwargs) -> None:
         if type == 'rgb':
             assert len(image.shape) == 3 and image.shape[2] == 3
             image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        elif type == 'bgr':
+            assert len(image.shape) == 3 and image.shape[2] == 3
         elif type == 'gray':
             assert len(image.shape) == 2
         elif type == 'depth':
@@ -216,6 +229,7 @@ class Sequence2DVisualizer:
             image = cv2.applyColorMap(image, cv2.COLORMAP_JET)
         else:
             raise NotImplementedError
+        image = cv2.resize(image, (int(image.shape[1] * scale), int(image.shape[0] * scale)), interpolation=cv2.INTER_NEAREST if type == 'depth' else cv2.INTER_AREA)
         
         if name not in self.names:
             cv2.namedWindow(name, cv2.WINDOW_AUTOSIZE)
@@ -224,7 +238,7 @@ class Sequence2DVisualizer:
         if name not in self.names:
             cv2.moveWindow(name, self.left, self.top)
             x, y, width, height = cv2.getWindowImageRect(name)
-            self.left += width * 2
+            self.left += width
             self.names.append(name)
 
 
@@ -236,6 +250,7 @@ class Sequence3DVisualizer:
         self.frames = {}
         self.arrows = {}
         self.points = {}
+        self.meshs = {}
         self.c2w = None
     
     def __del__(self) -> None:
@@ -249,6 +264,7 @@ class Sequence3DVisualizer:
         self.frames.clear()
         self.arrows.clear()
         self.points.clear()
+        self.meshs.clear()
     
     def update_frame(self, name:str, pose:Optional[np.ndarray]=None, size:Optional[float]=None) -> None:
         if name in self.frames:
@@ -329,8 +345,39 @@ class Sequence3DVisualizer:
             self.points[name] = {'object': points}
             self.visualizer.add_geometry(points)
     
-    def update_view(self, c2w:Optional[np.ndarray]=None) -> None:
-        if c2w is None or (self.c2w is not None and np.allclose(c2w, self.c2w)):
+    def update_mesh(self, name:str, path:Optional[str]=None, pose:Optional[np.ndarray]=None, scale:Optional[float]=None) -> None:
+        if name in self.meshs:
+            last_path = self.meshs[name]['path']
+            last_pose = self.meshs[name]['pose']
+            last_scale = self.meshs[name]['scale']
+            mesh = self.meshs[name]['object']
+
+            if not (path is None or path == last_path):
+                self.meshs[name]['path'] = path
+                self.visualizer.remove_geometry(mesh)
+                mesh = o3d.io.read_triangle_mesh(path)
+                mesh.scale(last_scale, center=[0, 0, 0])
+                mesh.transform(last_pose)
+                self.meshs[name]['object'] = mesh
+                self.visualizer.add_geometry(mesh)
+            if not (scale is None or np.allclose(scale, last_scale)):
+                mesh.scale(scale / last_scale, center=last_pose[:3, 3])
+                self.meshs[name]['scale'] = scale
+            if not (pose is None or np.allclose(pose, last_pose)):
+                mesh.transform(pose @ np.linalg.inv(last_pose))
+                self.meshs[name]['pose'] = pose
+            
+            self.visualizer.update_geometry(mesh)
+        else:
+            assert path is not None and pose is not None and scale is not None
+            mesh = o3d.io.read_triangle_mesh(path)
+            mesh.scale(scale, center=[0, 0, 0])
+            mesh.transform(pose)
+            self.meshs[name] = {'object': mesh, 'path':path, 'pose': pose, 'scale': scale}
+            self.visualizer.add_geometry(mesh)
+    
+    def update_view(self, c2w:Optional[np.ndarray]=None, enforce:bool=False) -> None:
+        if c2w is None or ((self.c2w is not None and np.allclose(c2w, self.c2w)) and (not enforce)):
             pass
         else:
             view_control = self.visualizer.get_view_control()
@@ -348,9 +395,12 @@ class SequenceKeyboardListener:
         self._verbose = verbose
         self.quit = False
         self.pause = False
+        self.reset = False
+        self.zero = False
         self.forward = False
         self.backward = False
         self.speed = 1
+        self.more = []
 
         self.listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
         self.listener.start()
@@ -370,6 +420,14 @@ class SequenceKeyboardListener:
             self.pause = not self.pause
             if self._verbose:
                 print('Pause' if self.pause else 'Resume')
+        elif key == keyboard.Key.enter:
+            self.reset = True
+            if self._verbose:
+                print('Reset')
+        elif key == keyboard.Key.backspace:
+            self.zero = True
+            if self._verbose:
+                print('Zero')
         elif key == keyboard.Key.right:
             self.forward = True
             if self._verbose:
@@ -387,6 +445,12 @@ class SequenceKeyboardListener:
             self.speed = max(1, self.speed)
             if self._verbose:
                 print(f'Speed: {self.speed}')
+        
+        for callback in self.more:
+            callback(key)
 
     def _on_release(self, key:keyboard.Key) -> None:
         pass
+
+    def add_more(self, callback:callable) -> None:
+        self.more.append(callback)

@@ -61,3 +61,12 @@ tarer = LinearMFTarer()
 tarer.add_data(f, pose)
 tare = tarer.run()
 ```
+
+```python
+from r3kit.utils.vis import Sequence3DVisualizer
+
+visualizer = Sequence3DVisualizer()
+for pc_xyzs, pc_rgbs in pc_list:
+    visualizer.update_points('pc', pc_xyzs, pc_rgbs)
+    visualizer.update_view()
+```
