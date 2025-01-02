@@ -18,8 +18,9 @@ setup(
         'open3d>=0.18.0', 
         'matplotlib', 
         'scipy', 
-        'transformations', 
         'psutil', 
+        'yourdfpy', 
+        'pynput', 
         'pyrealsense2==2.53.1.4623', # needed by camera realsense
         'pyopenxr', # needed by camera vive ultimate
         'pyserial', # needed by encoder pdcd angle and ftsensor robotiq ft300

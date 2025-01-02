@@ -1,9 +1,10 @@
 import os
-from typing import List, Optional
+from typing import List, Dict, Optional
 import numpy as np
 import open3d as o3d
 import cv2
 import matplotlib.pyplot as plt
+import yourdfpy
 import concurrent
 import concurrent.futures
 from pynput import keyboard
@@ -251,6 +252,7 @@ class Sequence3DVisualizer:
         self.arrows = {}
         self.points = {}
         self.meshs = {}
+        self.urdfs = {}
         self.c2w = None
     
     def __del__(self) -> None:
@@ -265,6 +267,8 @@ class Sequence3DVisualizer:
         self.arrows.clear()
         self.points.clear()
         self.meshs.clear()
+        self.urdfs.clear()
+        self.c2w = None
     
     def update_frame(self, name:str, pose:Optional[np.ndarray]=None, size:Optional[float]=None) -> None:
         if name in self.frames:
@@ -376,6 +380,57 @@ class Sequence3DVisualizer:
             self.meshs[name] = {'object': mesh, 'path':path, 'pose': pose, 'scale': scale}
             self.visualizer.add_geometry(mesh)
     
+    def update_urdf(self, name:str, path:Optional[str]=None, joints:Optional[Dict[str, float]]=None, pose:Optional[np.ndarray]=None, scale:Optional[float]=None) -> None:
+        if name in self.urdfs:
+            last_path = self.urdfs[name]['path']
+            last_pose = self.urdfs[name]['pose']
+            last_scale = self.urdfs[name]['scale']
+            urdf = self.urdfs[name]['object'][0]
+            geometry = self.urdfs[name]['object'][1]
+
+            if not (path is None or path == last_path):
+                self.urdfs[name]['path'] = path
+                self.visualizer.remove_geometry(geometry)
+                urdf = yourdfpy.URDF.load(path)
+                if joints is not None:
+                    urdf.update_cfg(joints)
+                mesh = urdf.scene.to_mesh()
+                geometry = o3d.geometry.TriangleMesh()
+                geometry.vertices = o3d.utility.Vector3dVector(mesh.vertices)
+                geometry.triangles = o3d.utility.Vector3iVector(mesh.faces)
+                geometry.scale(last_scale, center=[0, 0, 0])
+                geometry.transform(last_pose)
+                self.urdfs[name]['object'] = (urdf, geometry)
+                self.visualizer.add_geometry(geometry)
+            if joints is not None:
+                urdf.update_cfg(joints)
+                mesh = urdf.scene.to_mesh()
+                geometry.vertices = o3d.utility.Vector3dVector(mesh.vertices)
+                geometry.triangles = o3d.utility.Vector3iVector(mesh.faces)
+                geometry.scale(last_scale, center=[0, 0, 0])
+                geometry.transform(last_pose)
+            if not (scale is None or np.allclose(scale, last_scale)):
+                geometry.scale(scale / last_scale, center=last_pose[:3, 3])
+                self.urdfs[name]['scale'] = scale
+            if not (pose is None or np.allclose(pose, last_pose)):
+                geometry.transform(pose @ np.linalg.inv(last_pose))
+                self.urdfs[name]['pose'] = pose
+            
+            self.visualizer.update_geometry(geometry)
+        else:
+            assert path is not None and pose is not None and scale is not None
+            urdf = yourdfpy.URDF.load(path)
+            if joints is not None:
+                urdf.update_cfg(joints)
+            mesh = urdf.scene.to_mesh()
+            geometry = o3d.geometry.TriangleMesh()
+            geometry.vertices = o3d.utility.Vector3dVector(mesh.vertices)
+            geometry.triangles = o3d.utility.Vector3iVector(mesh.faces)
+            geometry.scale(scale, center=[0, 0, 0])
+            geometry.transform(pose)
+            self.urdfs[name] = {'object': (urdf, geometry), 'path': path, 'pose': pose, 'scale': scale}
+            self.visualizer.add_geometry(geometry)
+    
     def update_view(self, c2w:Optional[np.ndarray]=None, enforce:bool=False) -> None:
         if c2w is None or ((self.c2w is not None and np.allclose(c2w, self.c2w)) and (not enforce)):
             pass
@@ -400,6 +455,7 @@ class SequenceKeyboardListener:
         self.forward = False
         self.backward = False
         self.speed = 1
+        self.save = False
         self.more = []
 
         self.listener = keyboard.Listener(on_press=self._on_press, on_release=self._on_release)
@@ -420,7 +476,7 @@ class SequenceKeyboardListener:
             self.pause = not self.pause
             if self._verbose:
                 print('Pause' if self.pause else 'Resume')
-        elif key == keyboard.Key.enter:
+        elif key == keyboard.Key.ctrl_r:
             self.reset = True
             if self._verbose:
                 print('Reset')
@@ -428,6 +484,10 @@ class SequenceKeyboardListener:
             self.zero = True
             if self._verbose:
                 print('Zero')
+        elif key == keyboard.Key.shift_r:
+            self.save = True
+            if self._verbose:
+                print('Save')
         elif key == keyboard.Key.right:
             self.forward = True
             if self._verbose:

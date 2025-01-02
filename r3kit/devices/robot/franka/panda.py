@@ -1,6 +1,6 @@
 import time
 import numpy as np
-import transformations as tf
+from scipy.spatial.transform import Rotation as Rot
 from frankx import Robot, JointMotion, Affine, LinearMotion, ImpedanceMotion
 
 from r3kit.devices.robot.base import RobotBase
@@ -73,7 +73,7 @@ class Panda(RobotBase):
         if not relative:
             t2b = f2b @ self.t2f
             tr = t2b[:3, 3]
-            rot = tf.euler_from_matrix(t2b, axes='rzyx')
+            rot = Rot.from_matrix(t2b[:3, :3]).as_euler('ZYX')
             if not self.in_impedance_control:
                 action = LinearMotion(Affine(tr[0], tr[1], tr[2], rot[0], rot[1], rot[2]))
                 self.robot.move(action)
