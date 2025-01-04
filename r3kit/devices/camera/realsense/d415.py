@@ -185,7 +185,11 @@ class D415(CameraBase):
         return streaming_data
     
     def save_streaming(self, save_path:str, streaming_data:dict) -> None:
-        has_writer = os.path.exists(f'./.temp/{self.name}')
+        has_writer = False
+        for root, dirs, files in os.walk(f'./.temp/{self.name}'):
+            if len(files) > 0:
+                has_writer = True
+                break
         if not has_writer:
             assert len(streaming_data["color"]) == len(streaming_data["timestamp_ms"])
             if self._depth:
