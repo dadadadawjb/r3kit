@@ -9,7 +9,7 @@ conda activate rrr
 git clone git@github.com:dadadadawjb/r3kit.git
 
 cd r3kit
-pip install -e .
+pip install -e .[all]
 ```
 
 Additional manual dependencies (see `docs` to set up): 
