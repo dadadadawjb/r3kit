@@ -17,6 +17,51 @@ def transform_dir(dir_camera:np.ndarray, c2w:np.ndarray) -> np.ndarray:
     dir_world = dir_world_hm[:, :3]                                                             # (N, 3)
     return dir_world
 
+def transform_quat(quat_camera:np.ndarray, c2w:np.ndarray) -> np.ndarray:
+    # quat_camera: (N, 4) (xyzw), c2w: (4, 4)
+    quat_world = Rot.from_matrix(c2w[:3, :3] @ Rot.from_quat(quat_camera).as_matrix()).as_quat()
+    return quat_world
+
+def transform_frame(ref_T:np.ndarray, new_T:np.ndarray) -> np.ndarray:
+    """
+    ref_T: (4, 4)
+    new_T: (4, 4)
+    new_in_ref: (4, 4)
+    """
+    ref_t = ref_T[:3, 3]
+    new_t = new_T[:3, 3]
+    ref_R = Rot.from_matrix(ref_T[:3, :3])
+    new_R = Rot.from_matrix(new_T[:3, :3])
+
+    delta_t = new_t - ref_t
+    delta_t_rot = ref_R.inv().apply(delta_t)
+    R_rel = ref_R.inv() * new_R
+
+    new_in_ref = np.eye(4)
+    new_in_ref[:3, 3] = delta_t_rot
+    new_in_ref[:3, :3] = R_rel.as_matrix()
+    return new_in_ref
+
+def forward_frame(ref_T:np.ndarray, new_in_ref:np.ndarray) -> np.ndarray:
+    """
+    ref_T: (4, 4)
+    new_in_ref: (4, 4)
+    new_T: (4, 4)
+    """
+    ref_t = ref_T[:3, 3]
+    delta_t_rot = new_in_ref[:3, 3]
+    ref_R = Rot.from_matrix(ref_T[:3, :3])
+    R_rel = Rot.from_matrix(new_in_ref[:3, :3])
+
+    new_R = ref_R * R_rel
+    delta_t = ref_R.apply(delta_t_rot)
+    new_t = ref_t + delta_t
+
+    new_T = np.eye(4)
+    new_T[:3, 3] = new_t
+    new_T[:3, :3] = new_R.as_matrix()
+    return new_T
+
 
 def xyzquat2mat(xyz:np.ndarray, quat:np.ndarray) -> np.ndarray:
     pose_4x4 = np.eye(4)

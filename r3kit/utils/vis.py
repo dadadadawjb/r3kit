@@ -349,11 +349,12 @@ class Sequence3DVisualizer:
             self.points[name] = {'object': points}
             self.visualizer.add_geometry(points)
     
-    def update_mesh(self, name:str, path:Optional[str]=None, pose:Optional[np.ndarray]=None, scale:Optional[float]=None) -> None:
+    def update_mesh(self, name:str, path:Optional[str]=None, pose:Optional[np.ndarray]=None, scale:Optional[float]=None, color:Optional[np.ndarray]=None) -> None:
         if name in self.meshs:
             last_path = self.meshs[name]['path']
             last_pose = self.meshs[name]['pose']
             last_scale = self.meshs[name]['scale']
+            last_color = self.meshs[name]['color']
             mesh = self.meshs[name]['object']
 
             if not (path is None or path == last_path):
@@ -370,6 +371,9 @@ class Sequence3DVisualizer:
             if not (pose is None or np.allclose(pose, last_pose)):
                 mesh.transform(pose @ np.linalg.inv(last_pose))
                 self.meshs[name]['pose'] = pose
+            if not (color is None or np.allclose(color, last_color)):
+                mesh.paint_uniform_color(color)
+                self.meshs[name]['color'] = color
             
             self.visualizer.update_geometry(mesh)
         else:
@@ -377,14 +381,17 @@ class Sequence3DVisualizer:
             mesh = o3d.io.read_triangle_mesh(path)
             mesh.scale(scale, center=[0, 0, 0])
             mesh.transform(pose)
-            self.meshs[name] = {'object': mesh, 'path':path, 'pose': pose, 'scale': scale}
+            if color is not None:
+                mesh.paint_uniform_color(color)
+            self.meshs[name] = {'object': mesh, 'path':path, 'pose': pose, 'scale': scale, 'color': color}
             self.visualizer.add_geometry(mesh)
     
-    def update_urdf(self, name:str, path:Optional[str]=None, joints:Optional[Dict[str, float]]=None, pose:Optional[np.ndarray]=None, scale:Optional[float]=None) -> None:
+    def update_urdf(self, name:str, path:Optional[str]=None, joints:Optional[Dict[str, float]]=None, pose:Optional[np.ndarray]=None, scale:Optional[float]=None, color:Optional[np.ndarray]=None) -> None:
         if name in self.urdfs:
             last_path = self.urdfs[name]['path']
             last_pose = self.urdfs[name]['pose']
             last_scale = self.urdfs[name]['scale']
+            last_color = self.urdfs[name]['color']
             urdf = self.urdfs[name]['object'][0]
             geometry = self.urdfs[name]['object'][1]
 
@@ -415,6 +422,9 @@ class Sequence3DVisualizer:
             if not (pose is None or np.allclose(pose, last_pose)):
                 geometry.transform(pose @ np.linalg.inv(last_pose))
                 self.urdfs[name]['pose'] = pose
+            if not (color is None or np.allclose(color, last_color)):
+                geometry.paint_uniform_color(color)
+                self.urdfs[name]['color'] = color
             
             self.visualizer.update_geometry(geometry)
         else:
@@ -428,7 +438,9 @@ class Sequence3DVisualizer:
             geometry.triangles = o3d.utility.Vector3iVector(mesh.faces)
             geometry.scale(scale, center=[0, 0, 0])
             geometry.transform(pose)
-            self.urdfs[name] = {'object': (urdf, geometry), 'path': path, 'pose': pose, 'scale': scale}
+            if color is not None:
+                geometry.paint_uniform_color(color)
+            self.urdfs[name] = {'object': (urdf, geometry), 'path': path, 'pose': pose, 'scale': scale, 'color': color}
             self.visualizer.add_geometry(geometry)
     
     def update_view(self, c2w:Optional[np.ndarray]=None, enforce:bool=False) -> None:
