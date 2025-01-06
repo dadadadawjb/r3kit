@@ -9,7 +9,7 @@ conda activate rrr
 git clone git@github.com:dadadadawjb/r3kit.git
 
 cd r3kit
-pip install -e .[all]
+pip install -e .
 ```
 
 Additional manual dependencies (see `docs` to set up): 
@@ -69,4 +69,14 @@ visualizer = Sequence3DVisualizer()
 for pc_xyzs, pc_rgbs in pc_list:
     visualizer.update_points('pc', pc_xyzs, pc_rgbs)
     visualizer.update_view()
+```
+
+```python
+from r3kit.utils.buffer import ObsBuffer, ActBuffer
+
+obs_buffer = ObsBuffer()
+act_buffer = ActBuffer()
+while True:
+    obs_buffer.add1(o)
+    a = act_buffer.get1()
 ```
