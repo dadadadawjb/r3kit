@@ -29,5 +29,5 @@ def clear_memory():
 
 
 if __name__ == '__main__':
-    clear_shared_memory(['l515', 't265', 'd415', 'angler', 'ultimate', 'ft300'])
+    clear_shared_memory(['l515', 't265', 'd415', 'angler', 'ultimate', 'ft300', 'obs_buffer', 'act_buffer'])
     clear_memory()

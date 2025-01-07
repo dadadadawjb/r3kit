@@ -18,12 +18,17 @@ class ObsBuffer:
         step_memory_size = sum(item_memory_size.values())
         flag_shape, flag_dtype = (1,), np.dtype('bool')
         flag_memory_size = flag_dtype.itemsize * np.prod(flag_shape).item()
+        length_shape, length_dtype = (1,), np.dtype('int')
+        length_memory_size = length_dtype.itemsize * np.prod(length_shape).item()
+        idx_shape, idx_dtype = (1,), np.dtype('int')
+        idx_memory_size = idx_dtype.itemsize * np.prod(idx_shape).item()
+        all_memory_size = step_memory_size * self.num_obs + flag_memory_size + length_memory_size + idx_memory_size
         
         self.shm_manager = Manager()
         self.shm_lock = self.shm_manager.Lock()
         self.create = create
         if create:
-            self.shm_memory = shared_memory.SharedMemory(create=True, name='obs_buffer', size=step_memory_size * self.num_obs + flag_memory_size)
+            self.shm_memory = shared_memory.SharedMemory(create=True, name='obs_buffer', size=all_memory_size)
         else:
             while True:
                 try:
@@ -41,15 +46,20 @@ class ObsBuffer:
                 shm_array[name] = np.ndarray(shape, dtype=dtype, buffer=self.shm_memory.buf[offset:offset+item_memory_size[name]])
                 offset += item_memory_size[name]
             self.shm_arrays.append(shm_array)
-        self.shm_flag = np.ndarray(flag_shape, dtype=flag_dtype, buffer=self.shm_memory.buf[-flag_memory_size:])
+        self.shm_flag = np.ndarray(flag_shape, dtype=flag_dtype, buffer=self.shm_memory.buf[offset:offset+flag_memory_size])
+        offset += flag_memory_size
+        self.shm_length = np.ndarray(length_shape, dtype=length_dtype, buffer=self.shm_memory.buf[offset:offset+length_memory_size])
+        offset += length_memory_size
+        self.shm_idx = np.ndarray(idx_shape, dtype=idx_dtype, buffer=self.shm_memory.buf[offset:offset+idx_memory_size])
+        offset += idx_memory_size
         
-        self.length = 0
-        self.idx = 0
         if self.create:
             self.setf(False)
+            self.setl(0)
+            self.seti(0)
     
     def __len__(self) -> int:
-        return self.length
+        return self.getl()
     
     def __del__(self) -> None:
         if hasattr(self, "shm_memory"):
@@ -61,19 +71,23 @@ class ObsBuffer:
     
     def add1(self, obs:Dict[str, np.ndarray]) -> None:
         assert set(obs.keys()) == self.obs_names
+        idx = self.geti()
+        length = self.getl()
         with self.shm_lock:
             for name in obs.keys():
-                self.shm_arrays[self.idx][name][:] = obs[name]
-            self.idx = (self.idx + 1) % self.num_obs
-            self.length = min(self.length + 1, self.num_obs)
+                self.shm_arrays[idx][name][:] = obs[name]
+        self.seti((idx + 1) % self.num_obs)
+        self.setl(min(length + 1, self.num_obs))
     
     def getn(self) -> List[Dict[str, np.ndarray]]:
+        idx = self.geti()
+        length = self.getl()
         with self.shm_lock:
             obs = []
-            for i in range(self.length):
+            for i in range(length):
                 step_obs = {}
                 for name in self.obs_names:
-                    step_obs[name] = np.copy(self.shm_arrays[(self.idx + i) % self.num_obs][name])
+                    step_obs[name] = np.copy(self.shm_arrays[(idx + i) % self.num_obs][name])
                 obs.append(step_obs)
         return obs
     
@@ -84,6 +98,22 @@ class ObsBuffer:
     def getf(self) -> bool:
         with self.shm_lock:
             return self.shm_flag[:].item()
+    
+    def setl(self, length:int) -> None:
+        with self.shm_lock:
+            self.shm_length[:] = length
+    
+    def getl(self) -> int:
+        with self.shm_lock:
+            return self.shm_length[:].item()
+    
+    def seti(self, idx:int) -> None:
+        with self.shm_lock:
+            self.shm_idx[:] = idx
+    
+    def geti(self) -> int:
+        with self.shm_lock:
+            return self.shm_idx[:].item()
 
 
 class ActBuffer:
@@ -100,12 +130,17 @@ class ActBuffer:
         step_memory_size = sum(item_memory_size.values())
         flag_shape, flag_dtype = (1,), np.dtype('bool')
         flag_memory_size = flag_dtype.itemsize * np.prod(flag_shape).item()
+        length_shape, length_dtype = (1,), np.dtype('int')
+        length_memory_size = length_dtype.itemsize * np.prod(length_shape).item()
+        idx_shape, idx_dtype = (1,), np.dtype('int')
+        idx_memory_size = idx_dtype.itemsize * np.prod(idx_shape).item()
+        all_memory_size = step_memory_size * self.num_act + flag_memory_size + length_memory_size + idx_memory_size
         
         self.shm_manager = Manager()
         self.shm_lock = self.shm_manager.Lock()
         self.create = create
         if create:
-            self.shm_memory = shared_memory.SharedMemory(create=True, name='act_buffer', size=step_memory_size * self.num_act + flag_memory_size)
+            self.shm_memory = shared_memory.SharedMemory(create=True, name='act_buffer', size=all_memory_size)
         else:
             while True:
                 try:
@@ -123,15 +158,20 @@ class ActBuffer:
                 shm_array[name] = np.ndarray(shape, dtype=dtype, buffer=self.shm_memory.buf[offset:offset+item_memory_size[name]])
                 offset += item_memory_size[name]
             self.shm_arrays.append(shm_array)
-        self.shm_flag = np.ndarray(flag_shape, dtype=flag_dtype, buffer=self.shm_memory.buf[-flag_memory_size:])
+        self.shm_flag = np.ndarray(flag_shape, dtype=flag_dtype, buffer=self.shm_memory.buf[offset:offset+flag_memory_size])
+        offset += flag_memory_size
+        self.shm_length = np.ndarray(length_shape, dtype=length_dtype, buffer=self.shm_memory.buf[offset:offset+length_memory_size])
+        offset += length_memory_size
+        self.shm_idx = np.ndarray(idx_shape, dtype=idx_dtype, buffer=self.shm_memory.buf[offset:offset+idx_memory_size])
+        offset += idx_memory_size
         
-        self.length = 0
-        self.idx = 0
         if self.create:
             self.setf(False)
+            self.setl(0)
+            self.seti(0)
     
     def __len__(self) -> int:
-        return self.length
+        return self.getl()
     
     def __del__(self) -> None:
         if hasattr(self, "shm_memory"):
@@ -143,19 +183,22 @@ class ActBuffer:
     
     def addn(self, obs:List[Dict[str, np.ndarray]]) -> None:
         assert len(obs) == self.num_act
+        idx = self.geti()
+        assert idx == 0
         with self.shm_lock:
             for i in range(len(obs)):
                 assert set(obs[i].keys()) == self.obs_names
                 for name in obs[i].keys():
-                    self.shm_arrays[self.idx][name][:] = obs[i][name]
-        self.length = self.num_act
+                    self.shm_arrays[i][name][:] = obs[i][name]
+        self.setl(self.num_act)
     
     def get1(self) -> Dict[str, np.ndarray]:
+        idx = self.geti()
         with self.shm_lock:
             obs = {}
             for name in self.obs_names:
-                obs[name] = np.copy(self.shm_arrays[self.idx][name])
-        self.idx += 1
+                obs[name] = np.copy(self.shm_arrays[idx][name])
+        self.seti(idx + 1)
         return obs
     
     def setf(self, flag:bool) -> None:
@@ -165,3 +208,19 @@ class ActBuffer:
     def getf(self) -> bool:
         with self.shm_lock:
             return self.shm_flag[:].item()
+    
+    def setl(self, length:int) -> None:
+        with self.shm_lock:
+            self.shm_length[:] = length
+    
+    def getl(self) -> int:
+        with self.shm_lock:
+            return self.shm_length[:].item()
+    
+    def seti(self, idx:int) -> None:
+        with self.shm_lock:
+            self.shm_idx[:] = idx
+    
+    def geti(self) -> int:
+        with self.shm_lock:
+            return self.shm_idx[:].item()
