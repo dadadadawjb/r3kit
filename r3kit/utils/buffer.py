@@ -181,25 +181,25 @@ class ActBuffer:
             else:
                 self.shm_memory.close()
     
-    def addn(self, obs:List[Dict[str, np.ndarray]]) -> None:
-        assert len(obs) == self.num_act
+    def addn(self, act:List[Dict[str, np.ndarray]]) -> None:
+        assert len(act) == self.num_act
         idx = self.geti()
         assert idx == 0
         with self.shm_lock:
-            for i in range(len(obs)):
-                assert set(obs[i].keys()) == self.obs_names
-                for name in obs[i].keys():
-                    self.shm_arrays[i][name][:] = obs[i][name]
+            for i in range(len(act)):
+                assert set(act[i].keys()) == self.act_names
+                for name in act[i].keys():
+                    self.shm_arrays[i][name][:] = act[i][name]
         self.setl(self.num_act)
     
     def get1(self) -> Dict[str, np.ndarray]:
         idx = self.geti()
         with self.shm_lock:
-            obs = {}
-            for name in self.obs_names:
-                obs[name] = np.copy(self.shm_arrays[idx][name])
+            act = {}
+            for name in self.act_names:
+                act[name] = np.copy(self.shm_arrays[idx][name])
         self.seti(idx + 1)
-        return obs
+        return act
     
     def setf(self, flag:bool) -> None:
         with self.shm_lock:
