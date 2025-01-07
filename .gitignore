@@ -4,3 +4,5 @@
 __pycache__/
 
 *.egg-info/
+
+r3kit/devices/robot/flexiv/flexiv_rdk/

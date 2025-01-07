@@ -21,6 +21,7 @@ class ObsBuffer:
         
         self.shm_manager = Manager()
         self.shm_lock = self.shm_manager.Lock()
+        self.create = create
         if create:
             self.shm_memory = shared_memory.SharedMemory(create=True, name='obs_buffer', size=step_memory_size * self.num_obs + flag_memory_size)
         else:
@@ -44,10 +45,19 @@ class ObsBuffer:
         
         self.length = 0
         self.idx = 0
-        self.setf(False)
+        if self.create:
+            self.setf(False)
     
     def __len__(self) -> int:
         return self.length
+    
+    def __del__(self) -> None:
+        if hasattr(self, "shm_memory"):
+            if self.create:
+                self.shm_memory.close()
+                self.shm_memory.unlink()
+            else:
+                self.shm_memory.close()
     
     def add1(self, obs:Dict[str, np.ndarray]) -> None:
         assert set(obs.keys()) == self.obs_names
@@ -93,6 +103,7 @@ class ActBuffer:
         
         self.shm_manager = Manager()
         self.shm_lock = self.shm_manager.Lock()
+        self.create = create
         if create:
             self.shm_memory = shared_memory.SharedMemory(create=True, name='act_buffer', size=step_memory_size * self.num_act + flag_memory_size)
         else:
@@ -116,10 +127,19 @@ class ActBuffer:
         
         self.length = 0
         self.idx = 0
-        self.setf(False)
+        if self.create:
+            self.setf(False)
     
     def __len__(self) -> int:
         return self.length
+    
+    def __del__(self) -> None:
+        if hasattr(self, "shm_memory"):
+            if self.create:
+                self.shm_memory.close()
+                self.shm_memory.unlink()
+            else:
+                self.shm_memory.close()
     
     def addn(self, obs:List[Dict[str, np.ndarray]]) -> None:
         assert len(obs) == self.num_act

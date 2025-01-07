@@ -71,8 +71,8 @@ class Rizon(RobotBase):
         '''
         if self.mode == 'primitive':
             self.robot.ExecutePrimitive("Home", dict())
-            if self.block:
-                while not robot.primitive_states()["reachedTarget"]:
+            if self.blocking:
+                while not self.robot.primitive_states()["reachedTarget"]:
                     time.sleep(RIZON_BLOCK_WAIT_TIME)
             else:
                 pass
@@ -106,14 +106,14 @@ class Rizon(RobotBase):
         
         if self.mode == 'primitive':
             self.robot.ExecutePrimitive("MoveJ", {"target": np.rad2deg(joints).tolist()})
-            if self.block:
+            if self.blocking:
                 while not robot.primitive_states()["reachedTarget"]:
                     time.sleep(RIZON_BLOCK_WAIT_TIME)
             else:
                 pass
         elif self.mode == 'joint':
-            self.robot.SendJointPosition(joints.tolist(), velocities.tolist(), accelerations.tolist(), max_vel=max_vel.tolist(), max_acc=max_acc.tolist())
-            if self.block:
+            self.robot.SendJointPosition(joints.tolist(), velocities.tolist(), accelerations.tolist(), max_vel.tolist(), max_acc.tolist())
+            if self.blocking:
                 error = float('inf')
                 while error > RIZON_JOINT_EPSILON:
                     time.sleep(RIZON_BLOCK_WAIT_TIME)
@@ -143,7 +143,7 @@ class Rizon(RobotBase):
             raise ValueError("Gripper is not initialized")
         width = np.clip(width, self._gripper_limits[0], self._gripper_limits[1])
         self.gripper.Move(width, velocity)
-        if self.block:
+        if self.blocking:
             error = float('inf')
             while error > RIZON_GRIPPER_EPSILON:
                 time.sleep(RIZON_BLOCK_WAIT_TIME)
@@ -187,7 +187,7 @@ class Rizon(RobotBase):
             self.robot.SendCartesianMotionForce(vec.tolist(), wrench.tolist(), 
                                                 max_linear_vel=RIZON_TCP_MAX_VEL[0], max_linear_acc=RIZON_TCP_MAX_ACC[0], 
                                                 max_angular_vel=RIZON_TCP_MAX_VEL[1], max_angular_acc=RIZON_TCP_MAX_ACC[1])
-            if self.block:
+            if self.blocking:
                 if pure_motion:
                     error_xyz, error_quat = float('inf'), float('inf')
                     while error_xyz > RIZON_TCP_POSE_EPSILON[0] or error_quat > RIZON_TCP_POSE_EPSILON[1]:
