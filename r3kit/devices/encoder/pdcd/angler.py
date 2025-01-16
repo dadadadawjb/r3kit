@@ -311,7 +311,7 @@ class Angler(EncoderBase):
         count = 0
         result.append(raw[0] - initial_angle + 360 * count)
         for i in range(1, len(raw)):
-            if abs(raw[i] - raw[i-1]) > 100:
+            if abs(raw[i] - raw[i-1]) > 180:
                 count +=  1 if raw[i] - raw[i-1] < 0 else -1
             result.append(raw[i] - initial_angle + 360 * count)
         return np.array(result)
