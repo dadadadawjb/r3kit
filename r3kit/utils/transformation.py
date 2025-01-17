@@ -28,18 +28,7 @@ def transform_frame(ref_T:np.ndarray, new_T:np.ndarray) -> np.ndarray:
     new_T: (4, 4)
     new_in_ref: (4, 4)
     """
-    ref_t = ref_T[:3, 3]
-    new_t = new_T[:3, 3]
-    ref_R = Rot.from_matrix(ref_T[:3, :3])
-    new_R = Rot.from_matrix(new_T[:3, :3])
-
-    delta_t = new_t - ref_t
-    delta_t_rot = ref_R.inv().apply(delta_t)
-    R_rel = ref_R.inv() * new_R
-
-    new_in_ref = np.eye(4)
-    new_in_ref[:3, 3] = delta_t_rot
-    new_in_ref[:3, :3] = R_rel.as_matrix()
+    new_in_ref = np.linalg.inv(ref_T) @ new_T
     return new_in_ref
 
 def forward_frame(ref_T:np.ndarray, new_in_ref:np.ndarray) -> np.ndarray:
@@ -48,18 +37,7 @@ def forward_frame(ref_T:np.ndarray, new_in_ref:np.ndarray) -> np.ndarray:
     new_in_ref: (4, 4)
     new_T: (4, 4)
     """
-    ref_t = ref_T[:3, 3]
-    delta_t_rot = new_in_ref[:3, 3]
-    ref_R = Rot.from_matrix(ref_T[:3, :3])
-    R_rel = Rot.from_matrix(new_in_ref[:3, :3])
-
-    new_R = ref_R * R_rel
-    delta_t = ref_R.apply(delta_t_rot)
-    new_t = ref_t + delta_t
-
-    new_T = np.eye(4)
-    new_T[:3, 3] = new_t
-    new_T[:3, :3] = new_R.as_matrix()
+    new_T = ref_T @ new_in_ref
     return new_T
 
 
