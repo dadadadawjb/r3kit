@@ -38,24 +38,38 @@ def hsv2rgb(img:np.ndarray) -> np.ndarray:
     return rgb
 
 
-def color_jitter(img:np.ndarray, brightness:float=0., contrast:float=0., saturation:float=0., hue:float=0.) -> np.ndarray:
+def color_jitter(img:np.ndarray, brightness:float=0., contrast:float=0., saturation:float=0., hue:float=0., fixed:bool=False) -> np.ndarray:
     # img: [N, 3]
-    if brightness > 0:
-        factor = random.uniform(1 - brightness, 1 + brightness)
+    if brightness != 0:
+        if not fixed:
+            factor = random.uniform(1 - brightness, 1 + brightness)
+        else:
+            factor = 1 + brightness
         img = img * factor
 
-    if contrast > 0:
+    if contrast != 0:
         mean = np.mean(img, axis=0)
-        factor = random.uniform(1 - contrast, 1 + contrast)
+        if not fixed:
+            factor = random.uniform(1 - contrast, 1 + contrast)
+        else:
+            factor = 1 + contrast
         img = (img - mean[None, :]) * factor + mean[None, :]
 
-    if saturation > 0:
+    if saturation != 0:
         gray = np.dot(img, [0.2989, 0.5870, 0.1140])
-        img = img * (1 - saturation) + gray[:, None] * saturation
+        if not fixed:
+            factor = random.uniform(1 - saturation, 1 + saturation)
+        else:
+            factor = 1 + saturation
+        img = (img - gray[:, None]) * factor + gray[:, None]
 
-    if hue > 0:
+    if hue != 0:
         hsv = rgb2hsv(img)
-        hue_shift = np.random.uniform(-hue, hue) * 360
+        if not fixed:
+            factor = random.uniform(-hue, hue)
+        else:
+            factor = hue
+        hue_shift = factor * 360
         hsv[:, 0] = (hsv[:, 0] + hue_shift) % 360
         img = hsv2rgb(hsv)
 
