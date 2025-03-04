@@ -1,5 +1,6 @@
 import os
 from typing import List, Dict, Union, Optional
+import struct
 import time
 import gc
 import numpy as np
@@ -7,69 +8,94 @@ from threading import Thread, Lock, Event
 from multiprocessing import shared_memory, Manager
 from copy import deepcopy
 from functools import partial
-import serial
-from pymodbus.client import ModbusSerialClient
-from pymodbus import FramerType
+import socket
 
 from r3kit.devices.ftsensor.base import FTSensorBase
-from r3kit.devices.ftsensor.robotiq.config import *
+from r3kit.devices.ftsensor.ati.config import *
 from r3kit.utils.vis import draw_time, draw_items
 
 '''
-Modified from: https://github.com/hygradme/ft300python/tree/main/ft300python
+Modified from: https://github.com/Liuyvjin/ati-sensor/blob/master/pyati/ati_sensor.py
 '''
 
-def uint_to_int(register):
-    register_bytes = register.to_bytes(2, byteorder='little')
-    return int.from_bytes(register_bytes, byteorder='little', signed=True)
+
+class RDTCommand():
+    HEADER = 0x1234
+    # Possible values for command
+    CMD_STOP_STREAMING = 0
+    CMD_START_STREAMING = 2
+    CMD_SET_SOFTWARE_BIAS = 0x0042
+    # Special values for sample count
+    INFINITE_SAMPLES = 0
+
+    @classmethod
+    def pack(self, command, count=INFINITE_SAMPLES):
+        return struct.pack('!HHI', self.HEADER, command, count)
 
 
-class FT300(FTSensorBase):
-    '''
-    Applicable to FT300 and FT300-S
-    '''
-    def __init__(self, id:str=FT300_ID, fps:int=FT300_FPS, name:str='FT300') -> None:
+class PyATI(FTSensorBase):
+    def __init__(self, id:str=PYATI_ID, port:int=PYATI_PORT, fps:int=PYATI_FPS, name:str='PyATI') -> None:
         super().__init__(name=name)
 
         self._id = id
+        self._port = port
         self._fps = fps
 
-        # set up client
-        self._client = ModbusSerialClient(
-            port=id,
-            framer=FramerType.RTU,
-            stopbits=1,
-            bytesize=8,
-            parity="N",
-            baudrate=FT300_BAUDRATE,
-            timeout=1
-        )
-        try:
-            self._client.connect()
-        except Exception as e:
-            print(f'An error occurred: {e}')
+        # set up socket
+        retry = 0
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._connected = Event()
+        self._sock.setblocking(1)
+        self._sock.settimeout(10)
+        while retry < PYATI_RETRY:
+            try:
+                self._sock.connect((self._id, self._port))
+                self._connected.set()
+                break
+            except socket.timeout:
+                retry += 1
+            except Exception as e:
+                retry += 1
+            time.sleep(PYATI_RETRY_DELAY)
+        if retry >= PYATI_RETRY:
+            raise RuntimeError("Cannot connect to ATI sensor")
         
         # config
         self.ft_dtype = np.dtype(np.float64)
         self.ft_shape = (6,)
-
+        
         # stream
         self.in_streaming = Event()
     
     def __del__(self):
         if self.in_streaming.is_set():
-            for i in range(50):
-                self._ser.write([0xff])
-            self._ser.close()
+            self.stop_streaming()
+        if hasattr(self, "_sock"):
+            self._sock.close()
+
+    def _send_cmd(self, command, count=0) -> None:
+        if self._connected.wait(1):
+            self._sock.send(RDTCommand.pack(command, count))
         else:
-            self._client.close()
-    
-    def _read(self) -> Dict[str, Union[float, np.ndarray]]:
-        result = self._client.read_holding_registers(
-            address=FT300_REGISTER_DICT["F_x"], count=6, slave=9)
+            raise RuntimeError("Cannot connect to ATI sensor")
+
+    def _recv_data(self) -> np.ndarray:
+        # return: (6,)
+        if self._connected.wait(1):
+            raw_data = self._sock.recv(1024)
+            raw_data = np.array(struct.unpack('!3I6i', raw_data)[3:])
+            return raw_data * PYATI_SCALE
+        else:
+            raise RuntimeError("Cannot connect to ATI sensor")
+
+    def _read(self, n:int=1) -> Dict[str, Union[float, np.ndarray]]:
+        # return: (N, 6)
+        fts = np.empty((n, 6))
+        self._send_cmd(RDTCommand.CMD_START_STREAMING, n)
+        for i in range(n):
+            fts[i] = self._recv_data()
         receive_time = time.time() * 1000
-        ft = [uint_to_int(ft) / coef for ft, coef in zip(result.registers, FT300_FT_COEF)]
-        return {'ft': np.array(ft), 'timestamp_ms': receive_time}
+        return {'ft': fts, 'timestamp_ms': receive_time}
     
     def get(self) -> Dict[str, Union[float, np.ndarray]]:
         if not self.in_streaming.is_set():
@@ -124,25 +150,14 @@ class FT300(FTSensorBase):
                 }
             else:
                 pass
-        # Write 0x200 in stream register to start data streaming
-        try:
-            self._client.write_registers(address=FT300_REGISTER_DICT['Stream'], values=FT300_STREAM_FLAG, slave=9)
-        except Exception as e:
-            print(f'An error occurred: {e}')
-        self._ser = self._client.socket
-        # Read serial buffer until founding the bytes [0x20,0x4e]
-        self._ser.reset_input_buffer()
-        # Ignore first several values and get value for zero ft in the end
-        for i in range(10):
-            self._ser.read_until(FT300_STREAM_START)
+        self._send_cmd(RDTCommand.CMD_START_STREAMING, RDTCommand.INFINITE_SAMPLES)
         self.thread = Thread(target=partial(self._streaming_data, callback=callback), daemon=True)
         self.thread.start()
     
     def stop_streaming(self) -> Dict[str, Union[List[np.ndarray], List[float]]]:
         self.in_streaming.clear()
         self.thread.join()
-        for i in range(50):
-            self._ser.write([0xff])
+        self._send_cmd(RDTCommand.CMD_STOP_STREAMING, 0)
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
             self.streaming_data = {
@@ -248,14 +263,9 @@ class FT300(FTSensorBase):
             # get data
             if not self._collect_streaming_data:
                 continue
-            raw_bytes = bytearray(self._ser.read_until(FT300_STREAM_START))
+            ft = self._recv_data()
             receive_time = time.time() * 1000
-            ft = [int.from_bytes(
-                raw_bytes[i*2: i*2+2],
-                byteorder='little',
-                signed=True) / FT300_FT_COEF[i] for i in range(0, 6)
-            ]
-            data = {'ft': np.array(ft), 'timestamp_ms': receive_time}
+            data = {'ft': ft, 'timestamp_ms': receive_time}
             if callback is None:
                 if hasattr(self, "streaming_data"):
                     self.streaming_mutex.acquire()
@@ -286,7 +296,7 @@ class FT300(FTSensorBase):
 
 
 if __name__ == '__main__':
-    sensor = FT300(id='/dev/ttyUSB0', fps=100, name='FT300')
+    sensor = PyATI(id='192.168.1.10', port=49152, fps=100, name='PyATI')
     streaming = True
     shm = False
 
@@ -297,7 +307,7 @@ if __name__ == '__main__':
             time.sleep(0.1)
     else:
         sensor.collect_streaming(collect=True)
-        sensor.shm_streaming(shm='FT300' if shm else None)
+        sensor.shm_streaming(shm='PyATI' if shm else None)
         sensor.start_streaming()
 
         cmd = input("quit? (enter): ")
