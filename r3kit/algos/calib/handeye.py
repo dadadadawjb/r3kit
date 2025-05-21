@@ -19,7 +19,7 @@ class HandEyeCalibor(object):
     def add_image_pose(self, img:np.ndarray, pose:np.ndarray, vis:bool=True) -> bool:
         '''
         img: the image of chessboard in [0, 255] (h, w, 3) BGR
-        pose: 4x4 transformation matrix from robot base to gripper
+        pose: 4x4 transformation matrix from robot base to gripper in eye-in-hand mode, from gripper to robot base in eye-to-hand mode
         '''
         ret = self.ext_calibor.add_image(img, vis)
         if ret:
@@ -28,8 +28,8 @@ class HandEyeCalibor(object):
     
     def run(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         '''
-        b2w: 4x4 transformation matrix from robot base to world
-        g2c: 4x4 transformation matrix from gripper to camera
+        b2w: 4x4 transformation matrix from robot base to world in eye-in-hand mode, from gripper to world in eye-to-hand mode
+        g2c: 4x4 transformation matrix from gripper to camera in eye-in-hand mode, from robot base to camera in eye-to-hand mode
         '''
         w2c = self.ext_calibor.run()
         if w2c is not None:
