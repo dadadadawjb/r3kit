@@ -1,10 +1,11 @@
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import numpy as np
 import open3d as o3d
 import cv2
 import matplotlib.pyplot as plt
 import yourdfpy
+import tqdm
 import concurrent
 import concurrent.futures
 from pynput import keyboard
@@ -113,13 +114,31 @@ def save_imgs(path:str, frame_list:List[np.ndarray], suffix:str='png', normalize
         for future in concurrent.futures.as_completed(futures):
             pass
 
-def save_video(path:str, frame_list:List[np.ndarray], fps:int=30) -> None:
+def save_video(path:str, frame_list:List[np.ndarray], fps:float=30) -> None:
     height, width, _ = frame_list[0].shape
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(path, fourcc, fps, (width, height))
-    for frame in frame_list:
+    for frame in tqdm.tqdm(frame_list):
         out.write(frame)
     out.release()
+
+def decode_video(path:str) -> Union[List[np.ndarray], float]:
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        raise ValueError("Could not open video file.")
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    frame_list = []
+    with tqdm.tqdm(total=total_frames, desc="Decoding video") as pbar:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_list.append(frame)
+            pbar.update(1)
+    cap.release()
+    return (frame_list, video_fps)
 
 
 class Sequence1DVisualizer:
