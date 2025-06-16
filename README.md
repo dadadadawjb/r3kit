@@ -63,6 +63,12 @@ tare = tarer.run()
 ```
 
 ```python
+from r3kit.algos.align.umeyama import umeyama_align
+
+R, t, s, aligned_sources = umeyama_align(sources, targets)
+```
+
+```python
 from r3kit.utils.vis import Sequence3DVisualizer
 
 visualizer = Sequence3DVisualizer()
