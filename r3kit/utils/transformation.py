@@ -53,12 +53,26 @@ def mat2xyzquat(pose_4x4:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return (xyz, quat)
 
 
+def xyz2len(xyz:np.ndarray) -> float:
+    return np.linalg.norm(xyz)
 def delta_xyz(xyz1:np.ndarray, xyz2:np.ndarray) -> float:
     delta = xyz1 - xyz2
-    delta_value = np.linalg.norm(delta)
-    return delta_value
+    return xyz2len(delta)
 
 def delta_quat(quat1:np.ndarray, quat2:np.ndarray) -> float:
-    delta = Rot.from_quat(quat1).inv() * Rot.from_quat(quat2)
+    delta = Rot.from_quat(quat1).inv() * Rot.from_quat(quat2) # represented in quat1
     delta_value = delta.magnitude()
     return delta_value
+
+def rot2angle(rot:np.ndarray) -> float:
+    trace_rot = np.trace(rot)
+    theta = np.arccos((trace_rot - 1) / 2)
+    theta = np.clip(theta, 0, np.pi)
+    return theta
+def delta_rot(rot1:np.ndarray, rot2:np.ndarray) -> float:
+    delta = rot1.T @ rot2 # represented in rot1
+    return rot2angle(delta)
+
+def delta_mat(mat1:np.ndarray, mat2:np.ndarray) -> Tuple[float, float]:
+    delta = np.linalg.inv(mat1) @ mat2 # represented in mat1
+    return (xyz2len(delta[:3, 3]), rot2angle(delta[:3, :3]))
