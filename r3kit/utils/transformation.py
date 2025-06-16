@@ -66,7 +66,7 @@ def delta_quat(quat1:np.ndarray, quat2:np.ndarray) -> float:
 
 def rot2angle(rot:np.ndarray) -> float:
     trace_rot = np.trace(rot)
-    theta = np.arccos((trace_rot - 1) / 2)
+    theta = np.arccos(np.clip((trace_R - 1) / 2, -1, 1))
     theta = np.clip(theta, 0, np.pi)
     return theta
 def delta_rot(rot1:np.ndarray, rot2:np.ndarray) -> float:
