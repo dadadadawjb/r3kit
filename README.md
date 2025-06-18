@@ -69,6 +69,12 @@ R, t, s, aligned_sources = umeyama_align(sources, targets)
 ```
 
 ```python
+from r3kit.algos.align.disp2metric import disp2metric
+
+b, s, pred_metric = disp2metric(gt_metric, pred_disp)
+```
+
+```python
 from r3kit.utils.vis import Sequence3DVisualizer
 
 visualizer = Sequence3DVisualizer()
