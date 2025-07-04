@@ -2,6 +2,7 @@ from typing import Tuple, Dict
 import numpy as np
 import open3d as o3d
 import yourdfpy
+import fpsample
 
 
 def voxelize(pc_xyz:np.ndarray, pc_rgb:np.ndarray, voxel_size:float) -> Tuple[np.ndarray, np.ndarray]:
@@ -16,17 +17,18 @@ def voxelize(pc_xyz:np.ndarray, pc_rgb:np.ndarray, voxel_size:float) -> Tuple[np
 def farthest_point_sample(point:np.ndarray, npoint:int) -> Tuple[np.ndarray, np.ndarray]:
     N, D = point.shape
     xyz = point[:,:3]
-    centroids = np.zeros((npoint,))
-    distance = np.ones((N,)) * 1e10
-    farthest = np.random.randint(0, N)
-    for i in range(npoint):
-        centroids[i] = farthest
-        centroid = xyz[farthest, :]
-        dist = np.sum((xyz - centroid) ** 2, -1)
-        mask = dist < distance
-        distance[mask] = dist[mask]
-        farthest = np.argmax(distance, -1)
-    centroids = centroids.astype(np.int32)
+    # centroids = np.zeros((npoint,), dtype=np.uint64)
+    # distance = np.ones((N,)) * 1e10
+    # farthest = np.random.randint(0, N)
+    # for i in range(npoint):
+    #     centroids[i] = farthest
+    #     centroid = xyz[farthest, :]
+    #     dist = np.sum((xyz - centroid) ** 2, -1)
+    #     mask = dist < distance
+    #     distance[mask] = dist[mask]
+    #     farthest = np.argmax(distance, -1)
+    h = max(3, min(9, int(round(0.5 * np.log2(N) - 1)))) # heuristic
+    centroids = fpsample.bucket_fps_kdline_sampling(xyz, npoint, h=h)
     point = point[centroids]
     return (point, centroids)
 

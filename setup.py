@@ -1,11 +1,12 @@
 from setuptools import setup, find_packages
 
 basics = [
-    'numpy<2.0.0', 
+    'numpy>=1.16.0,<2.0.0', 
     'opencv-python>=4.10.0', 
     'open3d>=0.18.0', 
     'matplotlib', 
     'scipy', 
+    'fpsample', 
     'psutil', 
     'yourdfpy', 
     'pynput', 
