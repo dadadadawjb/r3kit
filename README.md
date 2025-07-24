@@ -1,4 +1,6 @@
 # r3kit
+<img src="assets/logo.png" alt="r3kit" width="10%" >
+
 Real Robot Research Kit
 
 ## Setup
