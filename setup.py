@@ -7,6 +7,7 @@ basics = [
     'matplotlib', 
     'scipy', 
     'fpsample', 
+    'pycpd', 
     'psutil', 
     'yourdfpy', 
     'pynput', 

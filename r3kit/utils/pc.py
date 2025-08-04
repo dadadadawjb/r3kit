@@ -33,6 +33,17 @@ def farthest_point_sample(point:np.ndarray, npoint:int) -> Tuple[np.ndarray, np.
     return (point, centroids)
 
 
+def cal_avg_nn_dist(point:np.ndarray) -> float:
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(point)
+    pcd_tree = o3d.geometry.KDTreeFlann(pcd)
+    distances = []
+    for point in pcd.points:
+        _, idx, dists = pcd_tree.search_knn_vector_3d(point, 2)
+        distances.append(np.sqrt(dists[1]))
+    return np.mean(distances)
+
+
 def mesh2pc(obj_path:str, num_points:int) -> np.ndarray:
     mesh = o3d.io.read_triangle_mesh(obj_path)
     pc = mesh.sample_points_uniformly(number_of_points=num_points)

@@ -67,7 +67,7 @@ tare = tarer.run()
 ```python
 from r3kit.algos.align.umeyama import umeyama_align
 
-R, t, s, aligned_sources = umeyama_align(sources, targets)
+align_transformation, aligned_sources = umeyama_align(sources, targets)
 ```
 
 ```python

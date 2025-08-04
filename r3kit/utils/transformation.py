@@ -1,6 +1,7 @@
 from typing import Tuple
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
+from scipy.linalg import polar
 
 
 def transform_pc(pc_camera:np.ndarray, c2w:np.ndarray) -> np.ndarray:
@@ -66,7 +67,7 @@ def delta_quat(quat1:np.ndarray, quat2:np.ndarray) -> float:
 
 def rot2angle(rot:np.ndarray) -> float:
     trace_rot = np.trace(rot)
-    theta = np.arccos(np.clip((trace_R - 1) / 2, -1, 1))
+    theta = np.arccos(np.clip((trace_rot - 1) / 2, -1, 1))
     theta = np.clip(theta, 0, np.pi)
     return theta
 def delta_rot(rot1:np.ndarray, rot2:np.ndarray) -> float:
@@ -76,3 +77,8 @@ def delta_rot(rot1:np.ndarray, rot2:np.ndarray) -> float:
 def delta_mat(mat1:np.ndarray, mat2:np.ndarray) -> Tuple[float, float]:
     delta = np.linalg.inv(mat1) @ mat2 # represented in mat1
     return (xyz2len(delta[:3, 3]), rot2angle(delta[:3, :3]))
+def delta_smat(sm1:np.ndarray, sm2:np.ndarray) -> Tuple[float, float, float]:
+    t1, t2 = sm1[:3, 3], sm2[:3, 3]
+    rot1, s1 = polar(sm1[:3, :3])
+    rot2, s2 = polar(sm2[:3, :3])
+    return (delta_xyz(t1, t2), delta_rot(rot1, rot2), s2[0, 0] / s1[0, 0])
