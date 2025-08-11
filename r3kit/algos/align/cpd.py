@@ -3,12 +3,12 @@ import numpy as np
 from pycpd import RigidRegistration
 
 
-def cpd_align(sources:np.ndarray, targets:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def cpd_align(sources:np.ndarray, targets:np.ndarray, source_outlier:float=0.1, with_scale:bool=False) -> Tuple[np.ndarray, np.ndarray]:
     '''
     sources: (N, 3)
     targets: (N', 3)
     '''
-    reg = RigidRegistration(X=targets, Y=sources)
+    reg = RigidRegistration(X=targets, Y=sources, w=source_outlier, scale=with_scale)
     aligned_sources, (s, R, t) = reg.register()
     align_transformation = np.eye(4)
     align_transformation[:3, :3] = s * R.T
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     vis_pc(np.concatenate([sources, targets]),
            np.concatenate([np.array([[1, 0, 0]] * len(sources)), np.array([[0, 1, 0]] * len(targets))]))
 
-    align_transformation, aligned_sources = cpd_align(sources, targets)
+    align_transformation, aligned_sources = cpd_align(sources, targets, source_outlier=0.0, with_scale=True)
     vis_pc(np.concatenate([aligned_sources, targets]),
            np.concatenate([np.array([[1, 0, 0]] * len(aligned_sources)), np.array([[0, 1, 0]] * len(targets))]))
     print(delta_smat(align_transformation, transformation))
