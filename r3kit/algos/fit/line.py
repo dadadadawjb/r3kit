@@ -1,13 +1,16 @@
-from typing import Tuple
+from typing import Tuple, Optional
 import numpy as np
 
 
-def fit_line(points:np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
+def fit_line(points:np.ndarray, query_idx:Optional[int]=None) -> Tuple[np.ndarray, np.ndarray, float, Optional[float], Optional[float]]:
     '''
     points: (N, 3)
+    query_idx: int
     pivot: starting (3,)
     direction: motion (3,)
     error: float
+    min_dist: min line distance w.r.t. query, float
+    max_dist: max line distance w.r.t. query, float
     '''
     N = points.shape[0]
     assert N >= 2
@@ -31,7 +34,14 @@ def fit_line(points:np.ndarray) -> Tuple[np.ndarray, np.ndarray, float]:
     predicted = pivot[None, :] + ((points - pivot[None, :]) @ direction[:, None]) * direction[None, :]
     error = np.mean(np.linalg.norm(points - predicted, axis=1))
 
-    return (pivot, direction, error)
+    # query distance
+    if query_idx is not None:
+        min_dist = np.min(projected) - projected[query_idx]
+        max_dist = np.max(projected) - projected[query_idx]
+    else:
+        min_dist, max_dist = None, None
+
+    return (pivot, direction, error, min_dist, max_dist)
 
 
 if __name__ == '__main__':
@@ -51,10 +61,11 @@ if __name__ == '__main__':
                        [4.5, 4.6, 3.6],
                        [5., 5., 4.],
                        [5.51, 5.48, 4.6]])
-    pivot, direction, error = fit_line(points)
-    print(f'pivot: {pivot}, direction: {direction}, error: {error}')
+    pivot, direction, error, min_dist, max_dist = fit_line(points, query_idx=3)
+    print(f'pivot: {pivot}, direction: {direction}, error: {error}, min_dist: {min_dist}, max_dist: {max_dist}')
 
     import open3d as o3d
+    from r3kit.utils.transformation import align_dir
     geometries = []
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
@@ -63,21 +74,7 @@ if __name__ == '__main__':
 
     joint = o3d.geometry.TriangleMesh.create_arrow(cylinder_radius=0.01, cone_radius=0.02, cylinder_height=0.2, cone_height=0.1)
     joint.paint_uniform_color([1, 0, 0])
-    rotation = np.zeros((3, 3))
-    temp2 = np.cross(direction, np.array([1., 0., 0.]))
-    if np.linalg.norm(temp2) < 1e-6:
-        temp1 = np.cross(np.array([0., 1., 0.]), direction)
-        temp1 /= np.linalg.norm(temp1)
-        temp2 = np.cross(direction, temp1)
-        temp2 /= np.linalg.norm(temp2)
-    else:
-        temp2 /= np.linalg.norm(temp2)
-        temp1 = np.cross(temp2, direction)
-        temp1 /= np.linalg.norm(temp1)
-    rotation[:, 0] = temp1
-    rotation[:, 1] = temp2
-    rotation[:, 2] = direction
-    joint.rotate(rotation, np.array([[0], [0], [0]]))
+    joint.rotate(align_dir(np.array([0., 0., 1.]), direction), np.array([[0], [0], [0]]))
     joint.translate(pivot.reshape((3, 1)))
     geometries.append(joint)
 

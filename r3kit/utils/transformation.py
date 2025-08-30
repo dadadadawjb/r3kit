@@ -1,11 +1,13 @@
 from typing import Tuple
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
+from scipy.spatial import distance as Dist
 from scipy.linalg import polar
 
 
 def transform_pc(pc_camera:np.ndarray, c2w:np.ndarray) -> np.ndarray:
     # pc_camera: (N, 3), c2w: (4, 4)
+    # c2w support (s * R @ x + t), where s is scalar, R is (3, 3), t is (3,).
     pc_camera_hm = np.concatenate([pc_camera, np.ones((pc_camera.shape[0], 1), dtype=pc_camera.dtype)], axis=-1)        # (N, 4)
     pc_world_hm = pc_camera_hm @ c2w.T                                                          # (N, 4)
     pc_world = pc_world_hm[:, :3]                                                               # (N, 3)
@@ -13,9 +15,11 @@ def transform_pc(pc_camera:np.ndarray, c2w:np.ndarray) -> np.ndarray:
 
 def transform_dir(dir_camera:np.ndarray, c2w:np.ndarray) -> np.ndarray:
     # dir_camera: (N, 3), c2w: (4, 4)
+    # c2w support (s * R @ x + t), where s is scalar, R is (3, 3), t is (3,).
     dir_camera_hm = np.concatenate([dir_camera, np.zeros((dir_camera.shape[0], 1), dtype=dir_camera.dtype)], axis=-1)   # (N, 4)
     dir_world_hm = dir_camera_hm @ c2w.T                                                        # (N, 4)
     dir_world = dir_world_hm[:, :3]                                                             # (N, 3)
+    dir_world /= np.linalg.norm(dir_world, axis=-1, keepdims=True)
     return dir_world
 
 def transform_quat(quat_camera:np.ndarray, c2w:np.ndarray) -> np.ndarray:
@@ -42,16 +46,90 @@ def forward_frame(ref_T:np.ndarray, new_in_ref:np.ndarray) -> np.ndarray:
     return new_T
 
 
-def xyzquat2mat(xyz:np.ndarray, quat:np.ndarray) -> np.ndarray:
+def align_dir(src:np.ndarray, dst:np.ndarray) -> np.ndarray:
+    """
+    src: (3,) normalized
+    dst: (3,) normalized
+    rot: (3, 3) rotation matrix from src to dst
+    """
+    au = np.linalg.svd(src.reshape((-1, 1)))[0]
+    bu = np.linalg.svd(dst.reshape((-1, 1)))[0]
+    if np.linalg.det(au) < 0:
+        au[:, -1] *= -1.0
+    if np.linalg.det(bu) < 0:
+        bu[:, -1] *= -1.0
+    rot = bu.dot(au.T)
+    return rot
+
+
+def mean_xyz(xyzs:np.ndarray) -> np.ndarray:
+    # xyzs: (N, 3)
+    return np.mean(xyzs, axis=0)
+
+def median_xyz(xyzs:np.ndarray) -> np.ndarray:
+    # xyzs: (N, 3)
+    distances = Dist.cdist(xyzs, xyzs, metric='euclidean') # (N, N)
+    total_distance = distances.sum(axis=1) # (N,)
+    j_star = np.argmin(total_distance)
+    return xyzs[j_star]
+
+def mean_dir(dirs:np.ndarray) -> np.ndarray:
+    # dirs: (N, 3), normalized
+    dir_sum = np.sum(dirs, axis=0)
+    norm = np.linalg.norm(dir_sum)
+    if norm < 1e-12:
+        return np.array([1.0, 0.0, 0.0])
+    return dir_sum / norm
+
+def median_dir(dirs:np.ndarray) -> np.ndarray:
+    # dirs: (N, 3), normalized
+    dots = 1.0 - Dist.cdist(dirs, dirs, metric='cosine') # (N, N)
+    dots = np.clip(dots, -1.0, 1.0)
+    angles = np.arccos(dots)
+    total_angle = angles.sum(axis=1) # (N,)
+    j_star = np.argmin(total_angle)
+    return dirs[j_star]
+
+
+def xyzrot2mat(xyz:np.ndarray=np.zeros(3), rot:np.ndarray=np.eye(3)) -> np.ndarray:
+    pose_4x4 = np.eye(4)
+    pose_4x4[:3, :3] = rot
+    pose_4x4[:3, 3] = xyz
+    return pose_4x4
+
+def mat2xyzrot(pose_4x4:np.ndarray=np.eye(4)) -> Tuple[np.ndarray, np.ndarray]:
+    xyz = pose_4x4[:3, 3]
+    rot = pose_4x4[:3, :3]
+    return (xyz, rot)
+
+def xyzquat2mat(xyz:np.ndarray=np.zeros(3), quat:np.ndarray=np.array([0., 0., 0., 1.])) -> np.ndarray:
     pose_4x4 = np.eye(4)
     pose_4x4[:3, :3] = Rot.from_quat(quat).as_matrix()
     pose_4x4[:3, 3] = xyz
     return pose_4x4
 
-def mat2xyzquat(pose_4x4:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def mat2xyzquat(pose_4x4:np.ndarray=np.eye(4)) -> Tuple[np.ndarray, np.ndarray]:
     xyz = pose_4x4[:3, 3]
     quat = Rot.from_matrix(pose_4x4[:3, :3]).as_quat()
     return (xyz, quat)
+
+def sRt2smat(s:float, R:np.ndarray, t:np.ndarray) -> np.ndarray:
+    smat = np.eye(4)
+    smat[:3, :3] = s * R
+    smat[:3, 3] = t
+    smat[3, 3] = 1.0
+    return smat
+
+def smat2sRt(smat:np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
+    s = np.linalg.norm(smat[:3, :3], ord='fro') / np.sqrt(3.0)
+    R_approx = smat[:3, :3] / s
+    U, _, Vt = np.linalg.svd(R_approx)
+    R = U @ Vt
+    if np.linalg.det(R) < 0:
+        U[:, -1] *= -1
+        R = U @ Vt
+    t = smat[:3, 3]
+    return (s, R, t)
 
 
 def xyz2len(xyz:np.ndarray) -> float:

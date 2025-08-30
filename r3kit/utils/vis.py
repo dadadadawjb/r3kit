@@ -10,6 +10,8 @@ import concurrent
 import concurrent.futures
 from pynput import keyboard
 
+from .transformation import align_dir
+
 
 def vis_pc(xyz:np.ndarray, rgb:Optional[np.ndarray]=None, show_frame:bool=True) -> None:
     '''
@@ -30,24 +32,6 @@ def vis_pc(xyz:np.ndarray, rgb:Optional[np.ndarray]=None, show_frame:bool=True) 
         pass
     geometries.append(pcd)
     o3d.visualization.draw_geometries(geometries)
-
-
-def rotation_vec2mat(vec:np.ndarray) -> np.ndarray:
-    mat = np.zeros((3, 3))
-    temp2 = np.cross(vec, np.array([1., 0., 0.]))
-    if np.linalg.norm(temp2) < 1e-3:
-        temp1 = np.cross(np.array([0., 1., 0.]), vec)
-        temp1 /= np.linalg.norm(temp1)
-        temp2 = np.cross(vec, temp1)
-        temp2 /= np.linalg.norm(temp2)
-    else:
-        temp2 /= np.linalg.norm(temp2)
-        temp1 = np.cross(temp2, vec)
-        temp1 /= np.linalg.norm(temp1)
-    mat[:, 0] = temp1
-    mat[:, 1] = temp2
-    mat[:, 2] = vec
-    return mat
 
 
 def draw_time(timestamps:List[float], path:str) -> None:
@@ -319,7 +303,7 @@ class Sequence3DVisualizer:
             arrow = self.arrows[name]['object']
 
             arrow.translate(-last_offset)
-            arrow.rotate(np.linalg.inv(rotation_vec2mat(last_direction)), center=[0, 0, 0])
+            arrow.rotate(np.linalg.inv(align_dir(np.array([0., 0., 1.]), last_direction)), center=[0, 0, 0])
             arrow.scale(1 / last_size, center=[0, 0, 0])
 
             if size is None:
@@ -327,7 +311,7 @@ class Sequence3DVisualizer:
             arrow.scale(size, center=[0, 0, 0])
             if direction is None:
                 direction = last_direction
-            arrow.rotate(rotation_vec2mat(direction), center=[0, 0, 0])
+            arrow.rotate(align_dir(np.array([0., 0., 1.]), direction), center=[0, 0, 0])
             if offset is None:
                 offset = last_offset
             arrow.translate(offset)
@@ -346,7 +330,7 @@ class Sequence3DVisualizer:
                                                            resolution=20, cylinder_split=4, cone_split=1)
             arrow.paint_uniform_color(color)
             arrow.scale(size, center=[0, 0, 0])
-            arrow.rotate(rotation_vec2mat(direction), center=[0, 0, 0])
+            arrow.rotate(align_dir(np.array([0., 0., 1.]), direction), center=[0, 0, 0])
             arrow.translate(offset)
             self.arrows[name] = {'object': arrow, 'offset': offset, 'direction': direction, 'size': size, 'color': color}
             self.visualizer.add_geometry(arrow)

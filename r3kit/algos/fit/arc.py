@@ -1,58 +1,94 @@
-from typing import Tuple
+from typing import Tuple, Optional
 import numpy as np
 
 
-def fit_arc(points:np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, float]:
+def _build_plane_basis(n:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    # (u, v, n) right-hand coordinate system
+    a = np.array([1.0, 0.0, 0.0])
+    if abs(np.dot(a, n)) > 0.9:
+        a = np.array([0.0, 1.0, 0.0])
+    u = a - np.dot(a, n) * n
+    u /= (np.linalg.norm(u) + 1e-12)
+    v = np.cross(n, u)
+    v /= (np.linalg.norm(v) + 1e-12)
+    return (u, v)
+
+
+def fit_arc_2d(xy:np.ndarray) -> Tuple[np.ndarray, float]:
+    '''
+    xy: (N, 2)
+    center: (2,)
+    r: radius, float
+    '''
+    # least squares on x^2 + y^2 + a x + b y + c = 0
+    x = xy[:, 0]
+    y = xy[:, 1]
+    A = np.stack([x, y, np.ones_like(x)], axis=1) # (N, 3)
+    b = -(x**2 + y**2) # (N,)
+    p, *_ = np.linalg.lstsq(A, b, rcond=None)
+    a, b_, c = p
+    center = np.array([-a / 2.0, -b_ / 2.0])
+    r = np.sqrt(max(center[0] * center[0] + center[1] * center[1] - c, 0.0))
+    return (center, r)
+
+def fit_arc(points:np.ndarray, query_idx:Optional[int]=None) -> Tuple[np.ndarray, np.ndarray, float, float, Optional[float], Optional[float]]:
     '''
     points: (N, 3)
-    C: center, (3,)
-    A: right-hand normal, (3,)
+    query_idx: int
+    center: (3,)
+    normal: right-hand normal, (3,)
     r: radius, float
     error: float
+    min_angle: min arc angle w.r.t. query, float
+    max_angle: max arc angle w.r.t. query, float
     '''
-    # from https://blog.csdn.net/jiangjjp2812/article/details/106937333
     N = points.shape[0]
     assert N >= 3
 
-    # fit plane, ax+by+cz=1
-    A = np.linalg.pinv(points.T @ points) @ points.T @ np.ones((N, 1))
-    
-    # fit circle, C * (P1+P2)/2 = 0
-    indices = np.triu_indices(N, k=1)
-    i_indices, j_indices = indices
-    B = points[j_indices] - points[i_indices] # (N*(N-1)//2, 3)
-    points_squared_norms = np.sum(points**2, axis=1) # (N,)
-    L = (points_squared_norms[j_indices] - points_squared_norms[i_indices]).reshape(-1, 1) / 2 # (N*(N-1)//2, 1)
-    coefficient_matrix = np.zeros((4, 4))
-    coefficient_matrix[:3, :3] = B.T @ B
-    coefficient_matrix[:3, 3:] = A
-    coefficient_matrix[3:, :3] = A.T
-    coefficient_matrix[3, 3] = 0
-    rhs = np.zeros((4, 1))
-    rhs[:3, 0:] = B.T @ L
-    rhs[3, 0] = 1
-    C_lambda = np.linalg.pinv(coefficient_matrix) @ rhs
-    C = C_lambda[:3, 0]
-    A = (A / (np.linalg.norm(A) + 1e-8)).squeeze(axis=-1)
-    rs = np.linalg.norm(points - C, axis=-1)
-    r = np.mean(rs)
-    
+    # PCA minimal direction
+    centroid = np.mean(points, axis=0)
+    centered = points - centroid[None, :]
+    _, _, Vt = np.linalg.svd(centered, full_matrices=False)
+    normal = Vt[-1]
+    d = np.dot(normal, centroid) # n * (x - c) = 0, d = n * c, (N,)
+
+    # project to plane
+    t = points @ normal - d # (N,)
+    projected = points - t[:, None] * normal[None, :] # (N, 3)
+    u, v = _build_plane_basis(normal) # (3,), (3,)
+    xy = np.stack([(projected - centroid[None, :]) @ u, (projected - centroid[None, :]) @ v], axis=1) # (N, 2)
+    center_2d, r = fit_arc_2d(xy)
+    center = centroid + center_2d[0] * u + center_2d[1] * v
+
     # finetune direction
-    projected = points - ((points - C[None, :]) @ A[:, None]) * A[None, :]
-    v1 = projected[:-1] - C[None, :]
-    v2 = projected[1:] - C[None, :]
+    v1 = projected[:-1] - center[None, :]
+    v2 = projected[1:] - center[None, :]
     cross = np.cross(v1, v2)
     accum_cross = np.sum(cross, axis=0)
-    if np.dot(accum_cross, A) < 0:
-        A = -A
+    if np.dot(accum_cross, normal) < 0:
+        normal = -normal
     
     # calculate error
-    projected_offset = projected - C[None, :]
+    projected_offset = projected - center[None, :]
     projected_offset = projected_offset / (np.linalg.norm(projected_offset, axis=-1, keepdims=True) + 1e-8)
-    predicted = C[None, :] + r * projected_offset
+    predicted = center[None, :] + r * projected_offset
     error = np.mean(np.linalg.norm(points - predicted, axis=-1))
 
-    return (C, A, r, error)
+    # query angle
+    if query_idx is not None:
+        ref_x = projected_offset[query_idx]
+        ref_x /= (np.linalg.norm(ref_x) + 1e-8)
+        ref_y = np.cross(normal, ref_x)
+        ref_y /= (np.linalg.norm(ref_y) + 1e-8)
+        coords = np.stack([projected_offset @ ref_x, projected_offset @ ref_y], axis=1)   # (N,2)
+        angles = np.arctan2(coords[:, 1], coords[:, 0])
+        angles = np.unwrap(angles)
+        min_angle = np.min(angles)
+        max_angle = np.max(angles)
+    else:
+        min_angle, max_angle = None, None
+
+    return (center, normal, r, error, min_angle, max_angle)
 
 
 if __name__ == '__main__':
@@ -81,22 +117,23 @@ if __name__ == '__main__':
                     [-0.1, 0.989, 0.111],
                     [-0.2, 0.946, 0.254],
                     [-0.3, 0.83, 0.45]])
-    points = np.array([[11.5713, 6.9764, 10.4685],
-                    [11.5859, 9.088, 13.5831],
-                    [11.5802, 11.1949, 14.6103],
-                    [11.5542, 13.312, 14.7279],
-                    [11.5692, 15.3806, 14.0576],
-                    [11.5632, 17.4873, 12.1397],
-                    [11.5598, 17.8894, 6.4025],
-                    [11.5577, 15.8714, 4.0703],
-                    [11.5729, 13.8578, 3.232],
-                    [11.5657, 11.8711, 3.1326],
-                    [11.5706, 9.8797, 3.7866],
-                    [11.5663, 7.8676, 5.5348]])
-    C, A, r, error = fit_arc(points)
-    print(f'center: {C}, normal: {A}, radius: {r}, error: {error}')
+    points = np.array([[0.5713, 0.9764, 10.4685],
+                    [0.5859, 3.088, 13.5831],
+                    [0.5802, 5.1949, 14.6103],
+                    [0.5542, 7.312, 14.7279],
+                    [0.5692, 9.3806, 14.0576],
+                    [0.5632, 11.4873, 12.1397],
+                    [0.5598, 11.8894, 6.4025],
+                    [0.5577, 9.8714, 4.0703],
+                    [0.5729, 7.8578, 3.232],
+                    [0.5657, 5.8711, 3.1326],
+                    [0.5706, 3.8797, 3.7866],
+                    [0.5663, 1.8676, 5.5348]])
+    center, normal, r, error, min_angle, max_angle = fit_arc(points, query_idx=5)
+    print(f'center: {center}, normal: {normal}, radius: {r}, error: {error}, min_angle: {min_angle * 180 / np.pi}, max_angle: {max_angle * 180 / np.pi}')
 
     import open3d as o3d
+    from r3kit.utils.transformation import align_dir
     geometries = []
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
@@ -105,22 +142,8 @@ if __name__ == '__main__':
     
     joint = o3d.geometry.TriangleMesh.create_arrow(cylinder_radius=0.01, cone_radius=0.02, cylinder_height=0.2, cone_height=0.1)
     joint.paint_uniform_color([1, 0, 0])
-    rotation = np.zeros((3, 3))
-    temp2 = np.cross(A, np.array([1., 0., 0.]))
-    if np.linalg.norm(temp2) < 1e-6:
-        temp1 = np.cross(np.array([0., 1., 0.]), A)
-        temp1 /= np.linalg.norm(temp1)
-        temp2 = np.cross(A, temp1)
-        temp2 /= np.linalg.norm(temp2)
-    else:
-        temp2 /= np.linalg.norm(temp2)
-        temp1 = np.cross(temp2, A)
-        temp1 /= np.linalg.norm(temp1)
-    rotation[:, 0] = temp1
-    rotation[:, 1] = temp2
-    rotation[:, 2] = A
-    joint.rotate(rotation, np.array([[0], [0], [0]]))
-    joint.translate(C.reshape((3, 1)))
+    joint.rotate(align_dir(np.array([0., 0., 1.]), normal), np.array([[0], [0], [0]]))
+    joint.translate(center.reshape((3, 1)))
     geometries.append(joint)
 
     o3d.visualization.draw_geometries(geometries)

@@ -79,7 +79,7 @@ b, s, pred_metric = disp2metric(gt_metric, pred_disp)
 ```python
 from r3kit.algos.fit.arc import fit_arc
 
-C, A, r, error = fit_arc(points)
+center, normal, r, error, _, _ = fit_arc(points)
 ```
 
 ```python
