@@ -33,6 +33,16 @@ def farthest_point_sample(point:np.ndarray, npoint:int) -> Tuple[np.ndarray, np.
     return (point, centroids)
 
 
+def remove_outlier(pc:np.ndarray) -> np.ndarray:
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(pc)
+    nb_neighbors = max(10, min(int(np.sqrt(pc.shape[0])), 50)) # heuristic
+    std_ratio = 2.0
+    cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
+    inlier_pc = np.asarray(pcd.select_by_index(ind).points)
+    return inlier_pc
+
+
 def cal_avg_nn_dist(point:np.ndarray) -> float:
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(point)

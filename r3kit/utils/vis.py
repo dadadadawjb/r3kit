@@ -10,7 +10,64 @@ import concurrent
 import concurrent.futures
 from pynput import keyboard
 
+from .color import rgb2gray, cal_comp_color, pick_comp_color
 from .transformation import align_dir
+
+
+def overlay_mask(image:np.ndarray, mask:np.ndarray, mode:str='palette', alpha:float=0.5,
+                 bkg_mode:str='gray', bkg_alpha:float=0.5) -> np.ndarray:
+    """
+    image: (H, W, 3/4), BGR/BGRA, [0, 255]
+    mask: (H, W), [0., 1.]/[False, True]
+    out_image: (H, W, 3/4), BGR/BGRA, [0, 255]
+    """
+    img01 = image / 255.0
+    if image.shape[-1] == 3:
+        a01 = None
+        rgb01 = img01[..., ::-1]
+    else:
+        a01 = img01[..., 3:4]                   # (H, W, 1)
+        rgb01 = img01[..., :3][..., ::-1]       # (H, W, 3)
+    m01 = mask.astype(np.float32)[..., None]    # (H, W, 1)
+
+    if m01.max() > 0:
+        mean_rgb = (rgb01 * m01).sum(axis=(0,1)) / (m01.sum() + 1e-8)
+        base_luma = rgb2gray(mean_rgb)
+    else:
+        mean_rgb = None
+        base_luma = 0.5
+
+    if mode == 'palette':
+        color01 = pick_comp_color(mean_rgb, palette=None)
+    elif mode == 'complement':
+        color01 = cal_comp_color(mean_rgb)
+    else:
+        raise NotImplementedError
+    color01 = color01.reshape((1, 1, 3))
+
+    alpha_eff = alpha * m01
+    out_rgb = (1.0 - alpha_eff) * rgb01 + alpha_eff * color01   # (H, W, 3)
+
+    beta_eff = bkg_alpha * (1.0 - m01)
+    if bkg_mode == 'none':
+        pass
+    elif bkg_mode == 'desaturate':
+        gray = rgb2gray(out_rgb)[..., None]
+        out_rgb = (1.0 - beta_eff) * out_rgb + beta_eff * gray
+    elif bkg_mode == 'dim':
+        black = 0.0
+        out_rgb = (1.0 - beta_eff) * out_rgb + beta_eff * black
+    elif bkg_mode == 'gray':
+        gray = 0.5
+        out_rgb = (1.0 - beta_eff) * out_rgb + beta_eff * gray
+    else:
+        raise NotImplementedError
+
+    out_image = out_rgb[..., ::-1] * 255.0
+    if a01 is not None:
+        out_image = np.concatenate([out_image, a01 * 255.0], axis=-1)
+    out_image = np.clip(out_image, 0, 255).astype(np.uint8)
+    return out_image
 
 
 def vis_pc(xyz:np.ndarray, rgb:Optional[np.ndarray]=None, show_frame:bool=True) -> None:
