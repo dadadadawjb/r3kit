@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Tuple
 import numpy as np
 import open3d as o3d
 import cv2
@@ -163,7 +163,7 @@ def save_video(path:str, frame_list:List[np.ndarray], fps:float=30) -> None:
         out.write(frame)
     out.release()
 
-def decode_video(path:str) -> Union[List[np.ndarray], float]:
+def decode_video(path:str) -> Tuple[List[np.ndarray], float]:
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
         raise ValueError("Could not open video file.")
