@@ -1,5 +1,6 @@
 from typing import Tuple, Dict
 import numpy as np
+from scipy.spatial import cKDTree
 import open3d as o3d
 import yourdfpy
 import fpsample
@@ -41,6 +42,13 @@ def remove_outlier(pc:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
     inlier_pc = np.asarray(pcd.select_by_index(ind).points)
     return (inlier_pc, np.asarray(ind))
+
+
+def nearest_point_query(src:np.ndarray, query:np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    tree = cKDTree(src)
+    distances, indices = tree.query(query)
+    result_pc = src[indices]
+    return (result_pc, indices)
 
 
 def cal_avg_nn_dist(point:np.ndarray) -> float:
