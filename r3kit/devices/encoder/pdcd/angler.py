@@ -1,8 +1,9 @@
 import os
-from typing import List, Dict, Union, Optional
+from typing import Tuple, List, Dict, Union, Optional
 import struct
 import time
 import gc
+import tqdm
 import numpy as np
 from threading import Thread, Lock, Event
 from multiprocessing import shared_memory, Manager
@@ -19,48 +20,26 @@ Modified from: https://github.com/Galaxies99/easyrobot/blob/main/easyrobot/encod
 '''
 
 
-def hex2dex(e_hex):
-    return int(e_hex, 16)
-
-def hex2bin(e_hex):
-    return bin(int(e_hex, 16))
-
-def dex2bin(e_dex):
-    return bin(e_dex)
-
-def crc16(hex_num):
-    """
-    CRC16 verification
-    :param hex_num:
-    :return:
-    """
-    crc = '0xffff'
-    crc16 = '0xA001'
-    test = hex_num.split(' ')
-
-    crc = hex2dex(crc)  
-    crc16 = hex2dex(crc16) 
-    for i in test:
-        temp = '0x' + i
-        temp = hex2dex(temp) 
-        crc ^= temp  
+def crc16(msg:bytes) -> Tuple[int, str, str]:
+    crc = 0xFFFF
+    for n in range(len(msg)):
+        crc ^= msg[n]
         for i in range(8):
-            if dex2bin(crc)[-1] == '0':
+            if crc & 1:
                 crc >>= 1
-            elif dex2bin(crc)[-1] == '1':
+                crc ^= 0xA001
+            else:
                 crc >>= 1
-                crc ^= crc16
 
-    crc = hex(crc)
-    crc_H = crc[2:4]
-    crc_L = crc[-2:]
+    crc_H = hex(crc >> 8)[2:].zfill(2)      # high byte
+    crc_L = hex(crc & 0xFF)[2:].zfill(2)    # low byte
 
     return crc, crc_H, crc_L
 
 
 class Angler(EncoderBase):
     def __init__(self, id:str=ANGLER_ID, index:List[int]=ANGLER_INDEX, fps:int=ANGLER_FPS, 
-                 baudrate:int=ANGLER_BAUDRATE, gap:float=ANGLER_GAP, name:str='Angler') -> None:
+                 baudrate:int=ANGLER_BAUDRATE, gap:float=ANGLER_GAP, strict:bool=True, name:str='Angler') -> None:
         super().__init__(name=name)
 
         self._id = id
@@ -69,6 +48,8 @@ class Angler(EncoderBase):
         self._fps = fps
         self._baudrate = baudrate
         self._gap = gap
+        self._broadcast = self._gap < 0
+        self._strict = strict
 
         # serial
         self.ser = serial.Serial(id, baudrate=baudrate)
@@ -85,15 +66,23 @@ class Angler(EncoderBase):
         self.in_streaming = Event()
     
     def _read(self) -> Dict[str, Union[np.ndarray, float]]:
-        self.ser.flushInput()
+        # self.ser.flushInput()
+        assert self.ser.in_waiting == 0, f"Serial port buffer not empty: {self.ser.in_waiting} bytes"
 
-        for i in range(self._num):
-            sendbytes = str(self._index[i]).zfill(2) + " 03 00 41 00 01"
-            crc, crc_H, crc_L = crc16(sendbytes)
+        if not self._broadcast:
+            for i in range(self._num):
+                sendbytes = str(self._index[i]).zfill(2) + " 03 00 41 00 01"
+                crc, crc_H, crc_L = crc16(bytes.fromhex(sendbytes))
+                sendbytes = sendbytes + ' ' + crc_L + ' ' + crc_H
+                sendbytes = bytes.fromhex(sendbytes)
+                self.ser.write(sendbytes)
+                time.sleep(self._gap)
+        else:
+            sendbytes = "00 03 00 41 00 01"
+            crc, crc_H, crc_L = crc16(bytes.fromhex(sendbytes))
             sendbytes = sendbytes + ' ' + crc_L + ' ' + crc_H
             sendbytes = bytes.fromhex(sendbytes)
             self.ser.write(sendbytes)
-            time.sleep(self._gap)
         
         re = self.ser.read(7 * self._num)
         receive_time = time.time() * 1000
@@ -103,6 +92,19 @@ class Angler(EncoderBase):
         for i in range(self._num):
             rei = re[7*i:7*(i+1)]
             assert (rei[0] in not_received) and (rei[1] == 3) and (rei[2] == 2)
+
+            # check crc
+            crc, crc_H, crc_L = crc16(rei[:5])
+            actual_crc_L = hex(rei[5])[2:].zfill(2)
+            actual_crc_H = hex(rei[6])[2:].zfill(2)
+            if not (crc_L == actual_crc_L and crc_H == actual_crc_H):
+                crc_string = ' '.join([hex(x)[2:].zfill(2) for x in rei[:5]])
+                print(f"Warning: Encoder {rei[0]} CRC error: expected {crc_L}({rei[5]}) {crc_H}({rei[6]}), got {actual_crc_L} {actual_crc_H}, CRC String: {crc_string}")
+                if self._strict:
+                    return self._read() # retry reading
+                else:
+                    pass                # ignore error
+
             not_received.remove(rei[0])
             angle = 360 * (rei[3] * 256 + rei[4]) / 4096
             ret[self._index.index(rei[0])] = angle
@@ -278,7 +280,7 @@ class Angler(EncoderBase):
     def _streaming_data(self, callback:Optional[callable]=None):
         while self.in_streaming.is_set():
             # fps
-            time.sleep(1/self._fps - self._gap * self._num)
+            # time.sleep(1/self._fps - self._gap * self._num)
 
             # get data
             if not self._collect_streaming_data:
@@ -318,15 +320,18 @@ class Angler(EncoderBase):
 
 
 if __name__ == "__main__":
-    encoder = Angler(id='/dev/ttyUSB0', index=[2], baudrate=115200, fps=30, gap=0.002, name='Angler')
+    # encoder = Angler(id='/dev/ttyUSB0', index=[2], baudrate=115200, fps=30, gap=0.002, name='Angler')
+    encoder = Angler(id='COM8', index=[1,2,3,4,5], baudrate=1000000, fps=0, gap=-1, strict=True, name='Angler')
     streaming = False
     shm = False
 
     if not streaming:
-        while True:
-            data = encoder.get()
-            print(data)
-            time.sleep(0.1)
+        np.set_printoptions(precision=3, floatmode='fixed', suppress=True)
+        with tqdm.tqdm() as pbar:
+            while True:
+                data = encoder.get()
+                pbar.update()
+                pbar.set_description(str(data['angle']))
     else:
         encoder.collect_streaming(collect=True)
         encoder.shm_streaming(shm='Angler' if shm else None)
