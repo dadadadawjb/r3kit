@@ -55,8 +55,8 @@ class Angler(EncoderBase):
         self.ser = serial.Serial(id, baudrate=baudrate)
         if not self.ser.is_open:
             raise RuntimeError('Fail to open the serial port, please check your settings again.')
-        self.ser.flushInput()
-        self.ser.flushOutput()
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
 
         # config
         self.angle_dtype = np.dtype(np.float64)
@@ -66,7 +66,7 @@ class Angler(EncoderBase):
         self.in_streaming = Event()
     
     def _read(self) -> Dict[str, Union[np.ndarray, float]]:
-        # self.ser.flushInput()
+        # self.ser.reset_input_buffer()
         assert self.ser.in_waiting == 0, f"Serial port buffer not empty: {self.ser.in_waiting} bytes"
 
         if not self._broadcast:
