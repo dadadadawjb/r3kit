@@ -10,6 +10,7 @@ from multiprocessing import shared_memory, Manager
 from copy import deepcopy
 from functools import partial
 import serial
+import socket
 
 from r3kit.devices.ftsensor.base import FTSensorBase
 from r3kit.devices.ftsensor.sri.config import *
@@ -17,22 +18,39 @@ from r3kit.utils.vis import draw_time, draw_items
 
 
 class M8128(FTSensorBase):
-    def __init__(self, id:str=M8128_ID, baudrate:int=M8128_BAUDRATE, fps:int=M8128_FPS, name:str='M8128') -> None:
+    def __init__(self, id:str=M8128_ID, baudrate:int=M8128_BAUDRATE, port:int=M8128_PORT, fps:int=M8128_FPS, comm:str='serial', name:str='M8128') -> None:
         super().__init__(name=name)
 
         self._id = id
         self._baudrate = baudrate
+        self._port = port
         self._fps = fps
+        self._comm = comm
 
-        # serial
-        self.ser = serial.Serial(id, baudrate=baudrate, timeout=M8128_TIMEOUT)
-        if not self.ser.is_open:
-            raise RuntimeError('Fail to open the serial port, please check your settings again.')
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
-        time.sleep(M8128_STARTTIME)
-        self._cmd(f"AT+SMPF={fps}")
-        self._cmd("AT+DCKMD=SUM")   # SUM check
+        if comm == 'serial':
+            # serial
+            self.ser = serial.Serial(id, baudrate=baudrate, timeout=M8128_TIMEOUT)
+            if not self.ser.is_open:
+                raise RuntimeError('Fail to open the serial port, please check your settings again.')
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+            time.sleep(M8128_STARTTIME)
+            self._cmd(f"AT+SMPF={fps}")
+            assert self.ser.readline().decode("ascii").strip() == f"ACK+SMPF={fps}$OK"
+            self._cmd("AT+DCKMD=SUM")   # SUM check
+            assert self.ser.readline().decode("ascii").strip() == "ACK+DCKMD=SUM$OK"
+        elif comm == 'tcp':
+            # tcp
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.settimeout(M8128_TIMEOUT)
+            self.sock.connect((id, port))
+            time.sleep(M8128_STARTTIME)
+            self._cmd(f"AT+SMPF={fps}")
+            assert self.sock.makefile('r', encoding='ascii', newline='\r\n').readline().strip() == f"ACK+SMPF={fps}$OK"
+            self._cmd("AT+DCKMD=SUM")   # SUM check
+            assert self.sock.makefile('r', encoding='ascii', newline='\r\n').readline().strip() == "ACK+DCKMD=SUM$OK"
+        else:
+            raise NotImplementedError
         
         # config
         self.ft_dtype = np.dtype(np.float64)
@@ -44,36 +62,80 @@ class M8128(FTSensorBase):
     def __del__(self):
         if self.in_streaming.is_set():
             self._cmd("AT+GSD=STOP")
-        self.ser.close()
+        
+        if self._comm == 'serial':
+            self.ser.close()
+        elif self._comm == 'tcp':
+            self.sock.close()
+        else:
+            raise NotImplementedError
     
     def _cmd(self, cmd:str) -> None:
         if not cmd.endswith("\r\n"):
             cmd += "\r\n"
-        self.ser.write(cmd.encode("ascii"))
+        
+        if self._comm == 'serial':
+            self.ser.write(cmd.encode("ascii"))
+        elif self._comm == 'tcp':
+            self.sock.sendall(cmd.encode("ascii"))
+        else:
+            raise NotImplementedError
     
     def _read(self) -> Dict[str, Union[float, np.ndarray]]:
-        self.ser.reset_input_buffer()
+        if self._comm == 'serial':
+            self.ser.reset_input_buffer()
+        elif self._comm == 'tcp':
+            pass
+        else:
+            raise NotImplementedError
         self._cmd("AT+GOD")
 
-        headbuf = self.ser.read_until(M8128_HDR)
-        if not headbuf.endswith(M8128_HDR):
-            return self._read()
-        len_bytes = self.ser.read(2)
-        if len(len_bytes) < 2:
-            return self._read()
-        length = (len_bytes[0] << 8) | len_bytes[1]
-        if length != M8128_LEN_SUM:
-            return self._read()
-        payload = self.ser.read(length)
-        if len(payload) < length:
-            return self._read()
-        pkgno = (payload[0] << 8) | payload[1]
-        data_bytes = payload[2:2+24]
-        sum_recv = payload[2+24]
-        if (sum(data_bytes) & 0xFF) != sum_recv:
-            return self._read()
-        fx, fy, fz, mx, my, mz = struct.unpack("<6f", data_bytes)
-        receive_time = time.time() * 1000
+        if self._comm == 'serial':
+            headbuf = self.ser.read_until(M8128_HDR)
+            receive_time1 = time.time() * 1000
+            if not headbuf.endswith(M8128_HDR):
+                return self._read()
+            len_bytes = self.ser.read(2)
+            if len(len_bytes) < 2:
+                return self._read()
+            length = (len_bytes[0] << 8) | len_bytes[1]
+            if length != M8128_LEN_SUM:
+                return self._read()
+            payload = self.ser.read(length)
+            receive_time2 = time.time() * 1000
+            if len(payload) < length:
+                return self._read()
+            pkgno = (payload[0] << 8) | payload[1]
+            data_bytes = payload[2:2+24]
+            sum_recv = payload[2+24]
+            if (sum(data_bytes) & 0xFF) != sum_recv:
+                return self._read()
+            fx, fy, fz, mx, my, mz = struct.unpack("<6f", data_bytes)
+            receive_time = (receive_time1 + receive_time2) / 2.
+        elif self._comm == 'tcp':
+            headbuf = self.sock.recv(2)
+            receive_time1 = time.time() * 1000
+            if not headbuf.endswith(M8128_HDR):
+                return self._read()
+            len_bytes = self.sock.recv(2)
+            if len(len_bytes) < 2:
+                return self._read()
+            length = (len_bytes[0] << 8) | len_bytes[1]
+            if length != M8128_LEN_SUM:
+                return self._read()
+            payload = self.sock.recv(length)
+            receive_time2 = time.time() * 1000
+            if len(payload) < length:
+                return self._read()
+            pkgno = (payload[0] << 8) | payload[1]
+            data_bytes = payload[2:2+24]
+            sum_recv = payload[2+24]
+            if (sum(data_bytes) & 0xFF) != sum_recv:
+                return self._read()
+            fx, fy, fz, mx, my, mz = struct.unpack("<6f", data_bytes)
+            receive_time = (receive_time1 + receive_time2) / 2.
+        else:
+            raise NotImplementedError
         return {'ft': np.array([fx, fy, fz, mx, my, mz]), 'timestamp_ms': receive_time}
     
     def get(self) -> Dict[str, Union[float, np.ndarray]]:
@@ -235,77 +297,73 @@ class M8128(FTSensorBase):
             }
     
     def _streaming_data(self, callback:Optional[callable]=None):
-        buf = bytearray()
         while self.in_streaming.is_set():
             # get data
             if not self._collect_streaming_data:
                 continue
-            chunk = self.ser.read(M8128_CHUNKSIZE)
-            receive_time = time.time() * 1000
-            if chunk:
-                buf.extend(chunk)
+
+            if self._comm == 'serial':
+                headbuf = self.ser.read_until(M8128_HDR)
+                receive_time1 = time.time() * 1000
+                if not headbuf.endswith(M8128_HDR):
+                    continue
+                len_bytes = self.ser.read(2)
+                if len(len_bytes) < 2:
+                    continue
+                length = (len_bytes[0] << 8) | len_bytes[1]
+                if length != M8128_LEN_SUM:
+                    continue
+                payload = self.ser.read(length)
+                receive_time2 = time.time() * 1000
+                if len(payload) < length:
+                    continue
+                pkgno = (payload[0] << 8) | payload[1]
+                data_bytes = payload[2:2+24]
+                sum_recv = payload[2+24]
+                if (sum(data_bytes) & 0xFF) != sum_recv:
+                    continue
+                fx, fy, fz, mx, my, mz = struct.unpack("<6f", data_bytes)
+                receive_time = (receive_time1 + receive_time2) / 2.
+            elif self._comm == 'tcp':
+                headbuf = self.sock.recv(2)
+                receive_time1 = time.time() * 1000
+                if not headbuf.endswith(M8128_HDR):
+                    continue
+                len_bytes = self.sock.recv(2)
+                if len(len_bytes) < 2:
+                    continue
+                length = (len_bytes[0] << 8) | len_bytes[1]
+                if length != M8128_LEN_SUM:
+                    continue
+                payload = self.sock.recv(length)
+                receive_time2 = time.time() * 1000
+                if len(payload) < length:
+                    continue
+                pkgno = (payload[0] << 8) | payload[1]
+                data_bytes = payload[2:2+24]
+                sum_recv = payload[2+24]
+                if (sum(data_bytes) & 0xFF) != sum_recv:
+                    continue
+                fx, fy, fz, mx, my, mz = struct.unpack("<6f", data_bytes)
+                receive_time = (receive_time1 + receive_time2) / 2.
             else:
-                continue
-            # parse data
-            fts = []
-            while True:
-                parsed, buf = self._parse(buf)
-                if parsed is None:
-                    break
-                pkgno, fx, fy, fz, mx, my, mz = parsed
-                fts.append([fx, fy, fz, mx, my, mz])
-            datas = []
-            for idx, ft in enumerate(fts):
-                data = {'ft': np.array(ft), 'timestamp_ms': receive_time - (len(fts) - 1 - idx) * (1000 / self._fps)}
-                datas.append(data)
+                raise NotImplementedError
+            
+            data = {'ft': np.array([fx, fy, fz, mx, my, mz]), 'timestamp_ms': receive_time}
             if callback is None:
                 if hasattr(self, "streaming_data"):
                     self.streaming_mutex.acquire()
-                    for data in datas:
-                        self.streaming_data['ft'].append(data['ft'])
-                        self.streaming_data['timestamp_ms'].append(data['timestamp_ms'])
+                    self.streaming_data['ft'].append(data['ft'])
+                    self.streaming_data['timestamp_ms'].append(data['timestamp_ms'])
                     self.streaming_mutex.release()
                 elif hasattr(self, "streaming_array"):
                     with self.streaming_lock:
-                        self.streaming_array["ft"][:] = datas[-1]['ft'][:]
-                        self.streaming_array["timestamp_ms"][:] = datas[-1]['timestamp_ms']
+                        self.streaming_array["ft"][:] = data['ft'][:]
+                        self.streaming_array["timestamp_ms"][:] = data['timestamp_ms']
                 else:
                     raise AttributeError
             else:
-                for data in datas:
-                    callback(deepcopy(data))
-    
-    @staticmethod
-    def _parse(buf:bytearray) -> Tuple[Optional[Tuple[int, float, float, float, float, float, float]], bytearray]:
-        i = 0
-        n = len(buf)
-        while i + M8128_FRAME_TOTAL <= n:
-            # find frame header
-            if buf[i] != M8128_HDR0 or buf[i+1] != M8128_HDR1:
-                i += 1
-                continue
-            # check length
-            length = (buf[i+2] << 8) | buf[i+3]
-            if length != M8128_LEN_SUM:
-                i += 1
-                continue
-            start = i
-            end = i + 4 + M8128_LEN_SUM
-            payload = buf[i+4:end]
-            # package number
-            pkgno = (payload[0] << 8) | payload[1]
-            data_bytes = payload[2:2+24]
-            # SUM check
-            checksum = payload[2+24]
-            if (sum(data_bytes) & 0xFF) != checksum:
-                i += 1
-                continue
-            # valid frame
-            fx, fy, fz, mx, my, mz = struct.unpack("<6f", data_bytes)
-            return (pkgno, fx, fy, fz, mx, my, mz), buf[end:]
-        # no valid frame
-        keep = buf[-64:] if n > 64 else buf
-        return None, keep
+                callback(deepcopy(data))
     
     @staticmethod
     def raw2tare(raw_ft:np.ndarray, tare:Dict[str, Union[float, np.ndarray]], pose:np.ndarray) -> np.ndarray:
@@ -322,8 +380,8 @@ class M8128(FTSensorBase):
 
 
 if __name__ == '__main__':
-    sensor = M8128(id='COM9', baudrate=115200, fps=100, name='M8128')
-    streaming = True
+    sensor = M8128(id='COM9', baudrate=115200, port=4008, fps=300, comm='serial', name='M8128')
+    streaming = False
     shm = False
 
     if not streaming:
