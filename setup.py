@@ -24,6 +24,12 @@ extras = {
     'xr': [
         'pyopenxr', # needed by camera vive
     ], 
+    'xense': [
+        'xensesdk', # needed by camera xense
+    ],
+    'vive3': [
+        'openvr', # needed by tracker vive3
+    ],
     'franka': [
         'frankx', # needed by robot franka
     ], 
