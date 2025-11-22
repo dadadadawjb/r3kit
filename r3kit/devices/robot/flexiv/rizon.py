@@ -2,18 +2,11 @@ from typing import List, Dict, Union, Optional
 import time
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
+import flexivrdk
 
 from r3kit.devices.robot.base import RobotBase
 from r3kit.devices.robot.flexiv.config import *
 from r3kit.utils.transformation import xyzquat2mat, mat2xyzquat, delta_xyz, delta_quat
-
-try:
-    import sys
-    sys.path.insert(0, FLEXIV_RDK_PATH)
-    import flexivrdk    # v1.5
-except ImportError:
-    print("Robot Flexiv Rizon needs `flexivrdk`")
-    sys.exit(1)
 
 
 class Rizon(RobotBase):
@@ -90,16 +83,13 @@ class Rizon(RobotBase):
         joints = np.array(self.robot.states().q)
         return joints
     
-    def joint_move(self, joints:np.ndarray, velocities:Optional[np.ndarray]=None, accelerations:Optional[np.ndarray]=None) -> None:
+    def joint_move(self, joints:np.ndarray, velocities:Optional[np.ndarray]=None) -> None:
         '''
         joints: 7 DoF joint angles in radian
         velocities: 7 DoF joint velocities in radian/s
-        accelerations: 7 DoF joint accelerations in radian/s^2
         '''
         if velocities is None:
             velocities = np.array([0.0]*self.DOF)
-        if accelerations is None:
-            accelerations = np.array([0.0]*self.DOF)
         joints = np.clip(joints, self._joint_limits[0], self._joint_limits[1])
         max_vel = np.array([RIZON_JOINT_MAX_VEL]*self.DOF)
         max_acc = np.array([RIZON_JOINT_MAX_ACC]*self.DOF)
@@ -112,7 +102,7 @@ class Rizon(RobotBase):
             else:
                 pass
         elif self.mode == 'joint':
-            self.robot.SendJointPosition(joints.tolist(), velocities.tolist(), accelerations.tolist(), max_vel.tolist(), max_acc.tolist())
+            self.robot.SendJointPosition(joints.tolist(), velocities.tolist(), max_vel.tolist(), max_acc.tolist())
             if self.blocking:
                 error = float('inf')
                 while error > RIZON_JOINT_EPSILON:

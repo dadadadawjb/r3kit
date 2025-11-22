@@ -125,6 +125,7 @@ class Xense(CameraBase):
                     np.float64.__name__,
                     (offset, offset+timestamp_memory_size)
                 )
+                self._save_streaming_meta(self.streaming_array_meta)
             else:
                 pass
         self.capture_thread = Thread(target=self._capture_thread, daemon=True)
@@ -173,11 +174,6 @@ class Xense(CameraBase):
     def shm_streaming(self, shm: Optional[str] = None) -> None:
         assert (not self.in_streaming) or (not self._collect_streaming_data)
         self._shm = shm
-        if self._shm is not None:
-            os.makedirs('.temp', exist_ok=True)
-            with open(os.path.join('.temp', f"{self._shm}_array_meta.json"), 'w') as f:
-                if hasattr(self, 'streaming_array_meta'):
-                    json.dump(self.streaming_array_meta, f, indent=4)
 
     def get_streaming(self) -> Dict[str, List[Union[np.ndarray, float]]]:
         assert not self._collect_streaming_data
@@ -251,6 +247,7 @@ class Xense(CameraBase):
                 np.float64.__name__,
                 (offset, offset+timestamp_memory_size)
             )
+            self._save_streaming_meta(self.streaming_array_meta)
 
     def _capture_thread(self):
         t0 = time.perf_counter()

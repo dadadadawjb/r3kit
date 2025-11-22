@@ -146,6 +146,7 @@ class D415(CameraBase):
                 if self._depth:
                     self.streaming_array["depth"] = np.ndarray(self.depth_image_shape, dtype=self.depth_image_dtype, buffer=self.streaming_memory.buf[:depth_memory_size])
                     self.streaming_array_meta["depth"] = (self.depth_image_shape, self.depth_image_dtype.name, (0, depth_memory_size))
+                self._save_streaming_meta(self.streaming_array_meta)
             self.pipeline_profile = self.pipeline.start(self.config, self.callback)
         self.in_streaming = True
 
@@ -343,6 +344,7 @@ class D415(CameraBase):
             if self._depth:
                 self.streaming_array["depth"] = np.ndarray(self.depth_image_shape, dtype=self.depth_image_dtype, buffer=self.streaming_memory.buf[:depth_memory_size])
                 self.streaming_array_meta["depth"] = (self.depth_image_shape, self.depth_image_dtype.name, (0, depth_memory_size))
+            self._save_streaming_meta(self.streaming_array_meta)
     
     def callback(self, frame):
         ts = time.time() * 1000

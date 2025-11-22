@@ -122,6 +122,7 @@ class FT300(FTSensorBase):
                     "ft": (self.ft_shape, self.ft_dtype.name, (0, ft_memory_size)), 
                     "timestamp_ms": ((1,), np.float64.__name__, (ft_memory_size, ft_memory_size+timestamp_memory_size))
                 }
+                self._save_streaming_meta(self.streaming_array_meta)
             else:
                 pass
         # Write 0x200 in stream register to start data streaming
@@ -239,6 +240,7 @@ class FT300(FTSensorBase):
                 "ft": (self.ft_shape, self.ft_dtype.name, (0, ft_memory_size)), 
                 "timestamp_ms": ((1,), np.float64.__name__, (ft_memory_size, ft_memory_size+timestamp_memory_size))
             }
+            self._save_streaming_meta(self.streaming_array_meta)
     
     def _streaming_data(self, callback:Optional[callable]=None):
         while self.in_streaming.is_set():

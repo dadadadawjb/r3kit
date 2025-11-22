@@ -128,6 +128,7 @@ class L515(CameraBase):
                     "color": (self.color_image_shape, self.color_image_dtype.name, (depth_memory_size, depth_memory_size+color_memory_size)), 
                     "timestamp_ms": ((1,), np.float64.__name__, (depth_memory_size+color_memory_size, depth_memory_size+color_memory_size+timestamp_memory_size))
                 }
+                self._save_streaming_meta(self.streaming_array_meta)
             self.pipeline_profile = self.pipeline.start(self.config, self.callback)
         self.in_streaming = True
 
@@ -303,6 +304,7 @@ class L515(CameraBase):
                 "color": (self.color_image_shape, self.color_image_dtype.name, (depth_memory_size, depth_memory_size+color_memory_size)), 
                 "timestamp_ms": ((1,), np.float64.__name__, (depth_memory_size+color_memory_size, depth_memory_size+color_memory_size+timestamp_memory_size))
             }
+            self._save_streaming_meta(self.streaming_array_meta)
     
     def callback(self, frame):
         ts = time.time() * 1000

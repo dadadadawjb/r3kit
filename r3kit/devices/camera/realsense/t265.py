@@ -156,6 +156,7 @@ class T265(CameraBase):
                     "quat": (self.quat_shape, self.quat_dtype.name, (xyz_memory_size, xyz_memory_size+quat_memory_size)), 
                     "timestamp_ms": ((1,), np.float64.__name__, (xyz_memory_size+quat_memory_size, xyz_memory_size+quat_memory_size+timestamp_memory_size))
                 }
+                self._save_streaming_meta(self.pose_streaming_array_meta, suffix='_pose')
                 if self._image:
                     self.image_streaming_lock = self.streaming_manager.Lock()
                     left_memory_size = self.left_image_dtype.itemsize * np.prod(self.left_image_shape).item()
@@ -172,6 +173,7 @@ class T265(CameraBase):
                         "right": (self.right_image_shape, self.right_image_dtype.name, (left_memory_size, left_memory_size+right_memory_size)), 
                         "timestamp_ms": ((1,), np.float64.__name__, (left_memory_size+right_memory_size, left_memory_size+right_memory_size+timestamp_memory_size))
                     }
+                    self._save_streaming_meta(self.image_streaming_array_meta, suffix='_image')
             self.pipeline_profile = self.pipeline.start(self.config, self.callback)
         self.in_streaming = True
 
@@ -403,6 +405,7 @@ class T265(CameraBase):
                 "quat": (self.quat_shape, self.quat_dtype.name, (xyz_memory_size, xyz_memory_size+quat_memory_size)), 
                 "timestamp_ms": ((1,), np.float64.__name__, (xyz_memory_size+quat_memory_size, xyz_memory_size+quat_memory_size+timestamp_memory_size))
             }
+            self._save_streaming_meta(self.pose_streaming_array_meta, suffix='_pose')
             if self._image:
                 self.image_streaming_lock = self.streaming_manager.Lock()
                 left_memory_size = self.left_image_dtype.itemsize * np.prod(self.left_image_shape).item()
@@ -419,6 +422,7 @@ class T265(CameraBase):
                     "right": (self.right_image_shape, self.right_image_dtype.name, (left_memory_size, left_memory_size+right_memory_size)), 
                     "timestamp_ms": ((1,), np.float64.__name__, (left_memory_size+right_memory_size, left_memory_size+right_memory_size+timestamp_memory_size))
                 }
+                self._save_streaming_meta(self.image_streaming_array_meta, suffix='_image')
     
     def callback(self, frame):
         ts = time.time() * 1000

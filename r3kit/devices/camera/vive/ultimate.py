@@ -242,6 +242,7 @@ class Ultimate(CameraBase):
                     "quat": (self.quat_shape, self.quat_dtype.name, (xyz_memory_size, xyz_memory_size+quat_memory_size)), 
                     "timestamp_ms": ((1,), np.float64.__name__, (xyz_memory_size+quat_memory_size, xyz_memory_size+quat_memory_size+timestamp_memory_size))
                 }
+                self._save_streaming_meta(self.streaming_array_meta)
             else:
                 pass
         self.thread = Thread(target=partial(self._streaming_data, callback=callback), daemon=True)
@@ -354,6 +355,7 @@ class Ultimate(CameraBase):
                 "quat": (self.quat_shape, self.quat_dtype.name, (xyz_memory_size, xyz_memory_size+quat_memory_size)), 
                 "timestamp_ms": ((1,), np.float64.__name__, (xyz_memory_size+quat_memory_size, xyz_memory_size+quat_memory_size+timestamp_memory_size))
             }
+            self._save_streaming_meta(self.streaming_array_meta)
     
     def _streaming_data(self, callback:Optional[callable]=None):
         while self.in_streaming.is_set():

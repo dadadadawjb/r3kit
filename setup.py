@@ -26,9 +26,12 @@ extras = {
     ], 
     'xense': [
         'xensesdk', # needed by camera xense
-    ],
+    ], 
     'vive3': [
         'openvr', # needed by tracker vive3
+    ], 
+    'flexiv': [
+        'flexivrdk', 'spdlog' # needed by robot flexiv
     ],
     'franka': [
         'frankx', # needed by robot franka
@@ -38,7 +41,7 @@ extras['all'] = list(set({pkg for pkgs in extras.values() for pkg in pkgs}))
 
 setup(
     name = 'r3kit', 
-    version = '0.0.1', 
+    version = '0.0.2', 
     license = 'MIT', 
     description = 'Research kits for real robots', 
     author = "Junbo Wang", 
