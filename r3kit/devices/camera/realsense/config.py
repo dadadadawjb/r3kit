@@ -15,6 +15,6 @@ T265_STREAMS = [
 
 D415_ID = '104122063633'
 D415_STREAMS = [
-    (rs.stream.depth, 640, 480, rs.format.z16, 15), 
-    (rs.stream.color, 640, 480, rs.format.bgr8, 15)
+    (rs.stream.depth, 640, 480, rs.format.z16, 30), 
+    (rs.stream.color, 640, 480, rs.format.bgr8, 30)
 ]

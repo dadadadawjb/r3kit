@@ -10,6 +10,7 @@ from threading import Lock, Thread
 from multiprocessing import shared_memory, Manager
 import pyrealsense2 as rs
 
+from r3kit.devices.config import *
 from r3kit.devices.camera.base import CameraBase
 from r3kit.devices.camera.realsense.config import *
 from r3kit.utils.vis import draw_time, save_imgs, save_img
@@ -128,9 +129,9 @@ class T265(CameraBase):
                     # TODO: ugly realtime write
                     self._write_flag = True
                     self._write_idx = 0
-                    if os.path.exists(f'./.temp/{self.name}'):
-                        shutil.rmtree(f'./.temp/{self.name}')
-                    self._image_streaming_data_writer = Thread(target=self._write_image_streaming_data, args=(f'./.temp/{self.name}',))
+                    if os.path.exists(os.path.join(TEMP_DIR, self.name)):
+                        shutil.rmtree(os.path.join(TEMP_DIR, self.name))
+                    self._image_streaming_data_writer = Thread(target=self._write_image_streaming_data, args=(os.path.join(TEMP_DIR, self.name),))
                     self._image_streaming_data_writer.start()
                 self.pose_streaming_mutex = Lock()
                 self.pose_streaming_data = {
@@ -233,7 +234,7 @@ class T265(CameraBase):
     def save_streaming(self, save_path:str, streaming_data:dict) -> None:
         if self._image:
             has_writer = False
-            for root, dirs, files in os.walk(f'./.temp/{self.name}'):
+            for root, dirs, files in os.walk(os.path.join(TEMP_DIR, self.name)):
                 if len(files) > 0:
                     has_writer = True
                     break
@@ -252,12 +253,12 @@ class T265(CameraBase):
             # os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
             idx_bias = 0
             if has_writer:
-                # os.rename(os.path.join(f'./.temp/{self.name}', 'left'), os.path.join(save_path, 'image', 'left'))
-                # os.rename(os.path.join(f'./.temp/{self.name}', 'right'), os.path.join(save_path, 'image', 'right'))
-                shutil.move(os.path.join(f'./.temp/{self.name}', 'left'), os.path.join(save_path, 'image', 'left'))
-                shutil.move(os.path.join(f'./.temp/{self.name}', 'right'), os.path.join(save_path, 'image', 'right'))
+                # os.rename(os.path.join(TEMP_DIR, self.name, 'left'), os.path.join(save_path, 'image', 'left'))
+                # os.rename(os.path.join(TEMP_DIR, self.name, 'right'), os.path.join(save_path, 'image', 'right'))
+                shutil.move(os.path.join(TEMP_DIR, self.name, 'left'), os.path.join(save_path, 'image', 'left'))
+                shutil.move(os.path.join(TEMP_DIR, self.name, 'right'), os.path.join(save_path, 'image', 'right'))
                 idx_bias = self._write_idx
-                shutil.rmtree(f'./.temp/{self.name}')
+                shutil.rmtree(os.path.join(TEMP_DIR, self.name))
             else:
                 os.makedirs(os.path.join(save_path, 'image', 'left'), exist_ok=True)
                 os.makedirs(os.path.join(save_path, 'image', 'right'), exist_ok=True)
@@ -377,9 +378,9 @@ class T265(CameraBase):
                 # TODO: ugly realtime write
                 self._write_flag = True
                 self._write_idx = 0
-                if os.path.exists(f'./.temp/{self.name}'):
-                    shutil.rmtree(f'./.temp/{self.name}')
-                self._image_streaming_data_writer = Thread(target=self._write_image_streaming_data, args=(f'./.temp/{self.name}',))
+                if os.path.exists(os.path.join(TEMP_DIR, self.name)):
+                    shutil.rmtree(os.path.join(TEMP_DIR, self.name))
+                self._image_streaming_data_writer = Thread(target=self._write_image_streaming_data, args=(os.path.join(TEMP_DIR, self.name),))
                 self._image_streaming_data_writer.start()
             self.pose_streaming_mutex = Lock()
             self.pose_streaming_data = {

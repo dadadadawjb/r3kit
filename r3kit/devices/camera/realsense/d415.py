@@ -9,6 +9,7 @@ from threading import Lock, Thread
 from multiprocessing import shared_memory, Manager
 import pyrealsense2 as rs
 
+from r3kit.devices.config import *
 from r3kit.devices.camera.base import CameraBase
 from r3kit.devices.camera.utils import inpaint
 from r3kit.devices.camera.realsense.config import *
@@ -120,9 +121,9 @@ class D415(CameraBase):
                 # TODO: ugly realtime write
                 self._write_flag = True
                 self._write_idx = 0
-                if os.path.exists(f'./.temp/{self.name}'):
-                    shutil.rmtree(f'./.temp/{self.name}')
-                self._streaming_data_writer = Thread(target=self._write_streaming_data, args=(f'./.temp/{self.name}',))
+                if os.path.exists(os.path.join(TEMP_DIR, self.name)):
+                    shutil.rmtree(os.path.join(TEMP_DIR, self.name))
+                self._streaming_data_writer = Thread(target=self._write_streaming_data, args=(os.path.join(TEMP_DIR, self.name),))
                 self._streaming_data_writer.start()
             else:
                 self.streaming_manager = Manager()
@@ -187,7 +188,7 @@ class D415(CameraBase):
     
     def save_streaming(self, save_path:str, streaming_data:dict) -> None:
         has_writer = False
-        for root, dirs, files in os.walk(f'./.temp/{self.name}'):
+        for root, dirs, files in os.walk(os.path.join(TEMP_DIR, self.name)):
             if len(files) > 0:
                 has_writer = True
                 break
@@ -214,14 +215,14 @@ class D415(CameraBase):
         #     os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
         idx_bias = 0
         if has_writer:
-            # os.rename(os.path.join(f'./.temp/{self.name}', 'color'), os.path.join(save_path, 'color'))
+            # os.rename(os.path.join(TEMP_DIR, self.name, 'color'), os.path.join(save_path, 'color'))
             # if self._depth:
-            #     os.rename(os.path.join(f'./.temp/{self.name}', 'depth'), os.path.join(save_path, 'depth'))
-            shutil.move(os.path.join(f'./.temp/{self.name}', 'color'), os.path.join(save_path, 'color'))
+            #     os.rename(os.path.join(TEMP_DIR, self.name, 'depth'), os.path.join(save_path, 'depth'))
+            shutil.move(os.path.join(TEMP_DIR, self.name, 'color'), os.path.join(save_path, 'color'))
             if self._depth:
-                shutil.move(os.path.join(f'./.temp/{self.name}', 'depth'), os.path.join(save_path, 'depth'))
+                shutil.move(os.path.join(TEMP_DIR, self.name, 'depth'), os.path.join(save_path, 'depth'))
             idx_bias = self._write_idx
-            shutil.rmtree(f'./.temp/{self.name}')
+            shutil.rmtree(os.path.join(TEMP_DIR, self.name))
         else:
             os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
             if self._depth:
@@ -318,9 +319,9 @@ class D415(CameraBase):
             # TODO: ugly realtime write
             self._write_flag = True
             self._write_idx = 0
-            if os.path.exists(f'./.temp/{self.name}'):
-                shutil.rmtree(f'./.temp/{self.name}')
-            self._streaming_data_writer = Thread(target=self._write_streaming_data, args=(f'./.temp/{self.name}',))
+            if os.path.exists(os.path.join(TEMP_DIR, self.name)):
+                shutil.rmtree(os.path.join(TEMP_DIR, self.name))
+            self._streaming_data_writer = Thread(target=self._write_streaming_data, args=(os.path.join(TEMP_DIR, self.name),))
             self._streaming_data_writer.start()
         else:
             self.streaming_manager = Manager()

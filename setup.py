@@ -26,6 +26,7 @@ extras = {
     ], 
     'xense': [
         'xensesdk', # needed by camera xense
+        'xensegripper', # needed by gripper xense
     ], 
     'vive3': [
         'openvr', # needed by tracker vive3
