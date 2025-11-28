@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "r3kit"
+version = "0.0.2"
+description = "Real robot research kit"
+license = { text = "MIT" }
+
+authors = [
+  { name = "Junbo Wang", email = "sjtuwjb3589635689@sjtu.edu.cn" },
+]
+
+maintainers = [
+  { name = "Junbo Wang", email = "sjtuwjb3589635689@sjtu.edu.cn" },
+]
+
+dependencies = [
+  "numpy>=1.16.0,<2.0.0",
+  "opencv-python>=4.10.0",
+  "open3d>=0.18.0",
+  "matplotlib",
+  "scipy",
+  "fpsample",
+  "pycpd",
+  "psutil",
+  "yourdfpy",
+  "pynput",
+  "tqdm",
+]
+
+[project.optional-dependencies]
+comm = [
+  "pyserial",
+  "pymodbus",
+]
+rs = [
+  "pyrealsense2==2.53.1.4623",
+]
+xr = [
+  "pyopenxr",
+]
+xense = [
+  "xensesdk",
+  "xensegripper",
+]
+vive3 = [
+  "openvr",
+]
+flexiv = [
+  "flexivrdk",
+  "spdlog",
+]
+franka = [
+  "frankx",
+]
+all = [
+  "pyserial",
+  "pymodbus",
+  "pyrealsense2==2.53.1.4623",
+  "pyopenxr",
+  "xensesdk",
+  "xensegripper",
+  "openvr",
+  "flexivrdk",
+  "spdlog",
+  "frankx",
+]
+
+[project.urls]
+Homepage = "https://github.com/dadadadawjb/r3kit"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]

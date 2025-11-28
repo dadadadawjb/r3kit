@@ -44,7 +44,7 @@ setup(
     name = 'r3kit', 
     version = '0.0.2', 
     license = 'MIT', 
-    description = 'Research kits for real robots', 
+    description = 'Real robot research kit', 
     author = "Junbo Wang", 
     author_email = "sjtuwjb3589635689@sjtu.edu.cn", 
     maintainer = "Junbo Wang", 
