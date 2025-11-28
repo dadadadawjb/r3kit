@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 
 from r3kit.algos.calib.chessboard import ChessboardExtCalibor
+from r3kit.algos.calib.aruco import ArucoExtCalibor
 from r3kit.algos.calib.config import *
 
 
@@ -11,6 +12,8 @@ class HandEyeCalibor(object):
                  ext_calib_params:dict={'patter_size': CHESSBOARD_PATTERN_SIZE, 'square_size': CHESSBOARD_SQUARE_SIZE}) -> None:
         if marker_type == 'chessboard':
             self.ext_calibor = ChessboardExtCalibor(**ext_calib_params)
+        elif marker_type == 'aruco':
+            self.ext_calibor = ArucoExtCalibor(**ext_calib_params)
         else:
             raise NotImplementedError
         
@@ -26,24 +29,25 @@ class HandEyeCalibor(object):
             self.b2g.append(pose)
         return ret
     
-    def run(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    def run(self, intrinsics:Optional[np.ndarray]=None, opt_intrinsics:bool=True, opt_distortion:bool=False) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         '''
         b2w: 4x4 transformation matrix from robot base to world in eye-in-hand mode, from gripper to world in eye-to-hand mode
         g2c: 4x4 transformation matrix from gripper to camera in eye-in-hand mode, from robot base to camera in eye-to-hand mode
         '''
-        w2c = self.ext_calibor.run()
-        if w2c is not None:
-            R_b2w, t_b2w, R_g2c, t_g2c = cv2.calibrateRobotWorldHandEye(w2c[:, :3, :3], w2c[:, :3, 3], 
-                                                                        np.array(self.b2g)[:, :3, :3], np.array(self.b2g)[:, :3, 3])
-            b2w = np.eye(4)
-            b2w[:3, :3] = R_b2w
-            b2w[:3, 3:] = t_b2w
-            g2c = np.eye(4)
-            g2c[:3, :3] = R_g2c
-            g2c[:3, 3:] = t_g2c
-            return (b2w, g2c)
-        else:
+        result = self.ext_calibor.run(intrinsics, opt_intrinsics, opt_distortion)
+        if result is None:
             return (None, None)
+        
+        w2c = result['extrinsics']
+        R_b2w, t_b2w, R_g2c, t_g2c = cv2.calibrateRobotWorldHandEye(w2c[:, :3, :3], w2c[:, :3, 3], 
+                                                                    np.array(self.b2g)[:, :3, :3], np.array(self.b2g)[:, :3, 3])
+        b2w = np.eye(4)
+        b2w[:3, :3] = R_b2w
+        b2w[:3, 3:] = t_b2w
+        g2c = np.eye(4)
+        g2c[:3, :3] = R_g2c
+        g2c[:3, 3:] = t_g2c
+        return (b2w, g2c)
 
 
 if __name__ == '__main__':

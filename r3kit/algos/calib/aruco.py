@@ -1,64 +1,109 @@
-from typing import Tuple, Dict, Optional
+from typing import Optional, List, Union, Dict
 import numpy as np
 import cv2
+from cv2 import aruco
 
 from r3kit.algos.calib.config import *
 from r3kit.algos.calib.utils import rodrigues_rvec2mat
 
 
-class ChessboardExtCalibor(object):
-    CRITERIA:tuple = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-    
-    def __init__(self, pattern_size:Tuple[int, int]=CHESSBOARD_PATTERN_SIZE, square_size:float=CHESSBOARD_SQUARE_SIZE) -> None:
-        '''
-        pattern_size: (block_num_x - 1, block_num_y - 1)
-        square_size: the size of each block in mm
-        '''
-        self.pattern_size = pattern_size
-        self.square_size = square_size
+def resolve_aruco_dict_id(dict_type:Union[str, int]) -> int:
+    if isinstance(dict_type, int):
+        return dict_type
+    if not isinstance(dict_type, str):
+        raise TypeError(f"dict_type must be str or int, got {type(dict_type)}.")
 
-        self.objp = np.zeros((pattern_size[0] * pattern_size[1], 3), np.float32)
-        self.objp[:, :2] = square_size * np.mgrid[0:pattern_size[0], 0:pattern_size[1]].T.reshape(-1, 2)
-        for i in range(pattern_size[0] * pattern_size[1]):
-            x, y = self.objp[i, 0], self.objp[i, 1]
-            self.objp[i, 0], self.objp[i, 1] = y, x
-        
+    name = dict_type.upper()
+    if not name.startswith("DICT_"):
+        name = "DICT_" + name
+
+    if not hasattr(aruco, name):
+        available = [k for k in dir(aruco) if k.startswith("DICT_")]
+        raise ValueError(
+            f"Unknown ArUco dictionary name '{dict_type}'. "
+            f"Resolved name '{name}' not found in cv2.aruco. "
+            f"Available examples: {available[:10]} ..."
+        )
+    return getattr(aruco, name)
+
+
+class ArucoExtCalibor(object):
+    CRITERIA:tuple = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+    def __init__(self, dict_type:Union[str, int]=ARUCO_DICT_TYPE, marker_length:float=ARUCO_MARKER_LENGTH) -> None:
+        """
+        dict_type: aruco dictionary spec. Examples: "DICT_4X4_50", "4x4_50", or an OpenCV enum int.
+        marker_length: the size of the marker in mm.
+        """
+        dict_id = resolve_aruco_dict_id(dict_type)
+        self.dictionary = aruco.getPredefinedDictionary(dict_id)
+
+        self.detector_params = aruco.DetectorParameters()
+        self.detector_params.cornerRefinementMethod = aruco.CORNER_REFINE_APRILTAG
+        self.detector_params.cornerRefinementWinSize = 5
+
+        self.detector = aruco.ArucoDetector(self.dictionary, self.detector_params)
+
+        # 3D template points for a single marker (4 corners, in mm)
+        self.marker_length = marker_length
+        L = marker_length
+        self.objp_marker = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [L, 0.0, 0.0],
+                [L, L, 0.0],
+                [0.0, L, 0.0],
+            ],
+            dtype=np.float32,
+        )
+
         self.obj_points = []    # 3D points in real world space
         self.img_points = []    # 2D points in image plane
-    
+
     def add_image(self, img:np.ndarray, vis:bool=True) -> bool:
         '''
         img: the image of chessboard in [0, 255] (h, w, 3) BGR
         ret: whether detected
         '''
-        if not hasattr(self, 'image_size'):
+        if not hasattr(self, "image_size"):
             self.image_size = img.shape[:2]
         else:
             assert img.shape[:2] == self.image_size, f'Image size {img.shape[:2]} does not match the camera intrinsics {self.image_size}'
         
         _img = img.copy()
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        ret, corners = cv2.findChessboardCorners(gray, self.pattern_size, None)
-        
+        corners, ids, rejected = self.detector.detectMarkers(gray)
+
+        ret = ids is not None and len(ids) > 0
         if ret:
-            corners2 = cv2.cornerSubPix(gray, corners, CHESSBOARD_CORNER_WINDOW_SIZE, (-1, -1), self.CRITERIA)
-            
-            self.obj_points.append(self.objp.copy())
+            assert len(ids) == 1, "Only one marker per image is expected."
+
+            corners2 = corners[0].reshape(-1, 2).astype(np.float32)
+            corners2 = cv2.cornerSubPix(gray, corners2, ARUCO_CORNER_WINDOW_SIZE, (-1, -1), self.CRITERIA)
+
+            self.obj_points.append(self.objp_marker.copy())
             self.img_points.append(corners2)
 
             if vis:
-                cv2.drawChessboardCorners(_img, self.pattern_size, corners2, ret)
-                cv2.imshow('chessboard', _img)
+                aruco.drawDetectedMarkers(_img, corners, ids, (0, 255, 0))
+                cv2.imshow("aruco", _img)
                 cv2.waitKey(500)
         return ret
-    
+
     def run(self, intrinsics:Optional[np.ndarray]=None, opt_intrinsics:bool=True, opt_distortion:bool=False) -> Optional[Dict[str, np.ndarray]]:
         '''
         extrinsics: Nx4x4 transformation matrices from world to camera in the detected added order
         intrinsics: 3x3 camera intrinsic matrix
         error: reprojection error
         '''
-        assert len(self.obj_points) >= 1, "Not enough valid images for chessboard calibration."
+        if opt_intrinsics and opt_distortion:
+            if len(self.obj_points) < ARUCO_CALIB_FULL_MIN_NUM:
+                raise RuntimeError(f"Not enough valid images for Aruco calibration. Minimum required is {ARUCO_CALIB_FULL_MIN_NUM}, but got {len(self.obj_points)}.")
+        elif not opt_intrinsics and not opt_distortion:
+            assert len(self.obj_points) >= 1, "Not enough valid images for Aruco calibration."
+        else:
+            if len(self.obj_points) < ARUCO_CALIB_HALF_MIN_NUM:
+                raise RuntimeError(f"Not enough valid images for Aruco calibration. Minimum required is {ARUCO_CALIB_HALF_MIN_NUM}, but got {len(self.obj_points)}.")
 
         if opt_distortion:
             distortion = None
@@ -111,7 +156,7 @@ if __name__ == '__main__':
 
     img_paths = sorted(glob.glob(os.path.join(args.data_dir, 'image_*.png')))
     
-    calibor = ChessboardExtCalibor(pattern_size=(11, 8), square_size=10)
+    calibor = ArucoExtCalibor(dict_type="6X6_1000", marker_length=80)
 
     for img_path in img_paths:
         img = cv2.imread(img_path, cv2.IMREAD_COLOR)

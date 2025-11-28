@@ -63,11 +63,11 @@ angle = encoder.get()
 
 #### Calibration
 ```python
-from r3kit.algos.calib.chessboard import ChessboardExtCalibor
+from r3kit.algos.calib.chessboard import ChessboardExtCalibor # more similar alternatives can be found
 
 calibor = ChessboardExtCalibor()
 calibor.add_image(img)
-w2c = calibor.run()
+result = calibor.run()
 ```
 ```python
 from r3kit.algos.calib.handeye import HandEyeCalibor

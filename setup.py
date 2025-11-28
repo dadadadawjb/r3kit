@@ -15,7 +15,7 @@ basics = [
 ]
 extras = {
     'comm': [
-        'pyserial', # needed by encoder pdcd angle and ftsensor robotiq ft300
+        'pyserial', # needed by encoder pdcd angle and ftsensor robotiq ft300 and ftsensor sri m8128
         'pymodbus', # needed by ftsensor robotiq ft300
     ], 
     'rs': [
