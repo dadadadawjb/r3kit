@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "r3kit"
 version = "0.0.2"
 description = "Real robot research kit"
+readme = "README.md"
+requires-python = ">=3.8"
 license = { text = "MIT" }
 
 authors = [

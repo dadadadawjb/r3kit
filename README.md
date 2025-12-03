@@ -11,10 +11,10 @@ conda activate rrr
 git clone git@github.com:dadadadawjb/r3kit.git
 
 cd r3kit
-pip install -e .
+pip install -e . --config-settings editable_mode=compat # editable for easy modification, compat for pylance parse
 ```
 
-Optional dependencies for different devices (see `setup.py` for more options):
+Optional dependencies for different devices (see `pyproject.toml` for more options):
 ```bash
 pip install -e .[rs,flexiv]
 ```
@@ -75,7 +75,7 @@ from r3kit.algos.calib.handeye import HandEyeCalibor
 calibor = HandEyeCalibor()
 for img, pose in zip(imgs, poses):
     calibor.add_image_pose(img, pose)
-b2w, g2c = calibor.run()
+result = calibor.run()
 ```
 ```python
 from r3kit.algos.calib.tcp import LinearOffsetCalibor

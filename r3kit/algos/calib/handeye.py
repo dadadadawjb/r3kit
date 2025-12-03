@@ -1,7 +1,8 @@
-from typing import Tuple, Optional
+from typing import Dict, Optional
 import numpy as np
 import cv2
 
+from r3kit.utils.transformation import delta_mat
 from r3kit.algos.calib.chessboard import ChessboardExtCalibor
 from r3kit.algos.calib.aruco import ArucoExtCalibor
 from r3kit.algos.calib.config import *
@@ -29,14 +30,15 @@ class HandEyeCalibor(object):
             self.b2g.append(pose)
         return ret
     
-    def run(self, intrinsics:Optional[np.ndarray]=None, opt_intrinsics:bool=True, opt_distortion:bool=False) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    def run(self, intrinsics:Optional[np.ndarray]=None, opt_intrinsics:bool=True, opt_distortion:bool=False) -> Optional[Dict[str, np.ndarray]]:
         '''
         b2w: 4x4 transformation matrix from robot base to world in eye-in-hand mode, from gripper to world in eye-to-hand mode
         g2c: 4x4 transformation matrix from gripper to camera in eye-in-hand mode, from robot base to camera in eye-to-hand mode
+        error: (reprojection error, translation error, rotation error)
         '''
         result = self.ext_calibor.run(intrinsics, opt_intrinsics, opt_distortion)
         if result is None:
-            return (None, None)
+            return None
         
         w2c = result['extrinsics']
         R_b2w, t_b2w, R_g2c, t_g2c = cv2.calibrateRobotWorldHandEye(w2c[:, :3, :3], w2c[:, :3, 3], 
@@ -47,7 +49,22 @@ class HandEyeCalibor(object):
         g2c = np.eye(4)
         g2c[:3, :3] = R_g2c
         g2c[:3, 3:] = t_g2c
-        return (b2w, g2c)
+
+        trans_errors, rot_errors = [], []
+        for w2c_i, b2g_i in zip(w2c, self.b2g):
+            T_left = b2w @ w2c_i
+            T_right = b2g_i @ g2c
+            trans_error, rot_error = delta_mat(T_left, T_right)
+            trans_errors.append(trans_error)
+            rot_errors.append(rot_error)
+        trans_error = np.mean(trans_errors)
+        rot_error = np.mean(rot_errors)
+        reproj_error = result['error']
+        return {
+            'b2w': b2w,
+            'g2c': g2c,
+            'error': np.array([reproj_error, trans_error, rot_error])
+        }
 
 
 if __name__ == '__main__':
@@ -70,9 +87,7 @@ if __name__ == '__main__':
         img = cv2.imread(img_path, cv2.IMREAD_COLOR)
         calibor.add_image_pose(img, b2g[idx], vis=True)
     
-    b2w, g2c = calibor.run()
-    print(b2w)
-    print(g2c)
-    np.save(os.path.join(args.data_dir, 'b2w.npy'), b2w)
-    np.save(os.path.join(args.data_dir, 'g2c.npy'), g2c)
+    result = calibor.run()
+    np.set_printoptions(precision=4, suppress=True)
+    print(result)
     import pdb; pdb.set_trace()
