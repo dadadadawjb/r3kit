@@ -24,6 +24,8 @@ Additional manual dependencies (see `docs` to set up):
 * VIVE Camera: `SteamVR` and `VIVE_Hub`
 
 ## Usage
+Nearly every class is accompanied by a demonstration in the main function.
+Some more complex use cases can be found in `examples`.
 
 ### Devices
 

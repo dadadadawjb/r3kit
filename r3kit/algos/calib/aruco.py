@@ -94,7 +94,7 @@ class ArucoExtCalibor(object):
         '''
         extrinsics: Nx4x4 transformation matrices from world to camera in the detected added order
         intrinsics: 3x3 camera intrinsic matrix
-        error: reprojection error
+        error: reprojection error in pixel
         '''
         if opt_intrinsics and opt_distortion:
             if len(self.obj_points) < ARUCO_CALIB_FULL_MIN_NUM:

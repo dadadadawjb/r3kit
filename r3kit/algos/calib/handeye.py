@@ -34,7 +34,7 @@ class HandEyeCalibor(object):
         '''
         b2w: 4x4 transformation matrix from robot base to world in eye-in-hand mode, from gripper to world in eye-to-hand mode
         g2c: 4x4 transformation matrix from gripper to camera in eye-in-hand mode, from robot base to camera in eye-to-hand mode
-        error: (reprojection error, translation error, rotation error)
+        error: (reprojection error in pixel, translation error in meter, rotation error in radian)
         '''
         result = self.ext_calibor.run(intrinsics, opt_intrinsics, opt_distortion)
         if result is None:
@@ -52,8 +52,8 @@ class HandEyeCalibor(object):
 
         trans_errors, rot_errors = [], []
         for w2c_i, b2g_i in zip(w2c, self.b2g):
-            T_left = b2w @ w2c_i
-            T_right = b2g_i @ g2c
+            T_left = w2c_i @ b2w
+            T_right = g2c @ b2g_i
             trans_error, rot_error = delta_mat(T_left, T_right)
             trans_errors.append(trans_error)
             rot_errors.append(rot_error)

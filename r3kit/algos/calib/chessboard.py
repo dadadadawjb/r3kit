@@ -56,7 +56,7 @@ class ChessboardExtCalibor(object):
         '''
         extrinsics: Nx4x4 transformation matrices from world to camera in the detected added order
         intrinsics: 3x3 camera intrinsic matrix
-        error: reprojection error
+        error: reprojection error in pixel
         '''
         assert len(self.obj_points) >= 1, "Not enough valid images for chessboard calibration."
 
