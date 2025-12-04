@@ -3,7 +3,7 @@ from typing import Tuple, List, Dict, Union, Optional
 import struct
 import time
 import gc
-import tqdm
+from rich import print
 import numpy as np
 from threading import Thread, Lock, Event
 from multiprocessing import shared_memory, Manager
@@ -15,6 +15,7 @@ import socket
 from r3kit.devices.ftsensor.base import FTSensorBase
 from r3kit.devices.ftsensor.sri.config import *
 from r3kit.utils.vis import draw_time, draw_items
+from r3kit import DEBUG, INFO
 
 
 class M8128(FTSensorBase):
@@ -202,6 +203,8 @@ class M8128(FTSensorBase):
         self._cmd("AT+GSD=STOP")
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} stop_streaming data size: {len(streaming_data['timestamp_ms'])}")
             self.streaming_data = {
                 "ft": [], 
                 "timestamp_ms": []
@@ -228,11 +231,15 @@ class M8128(FTSensorBase):
         np.save(os.path.join(save_path, "timestamps.npy"), np.array(streaming_data["timestamp_ms"], dtype=float))
         if len(streaming_data["timestamp_ms"]) > 1:
             freq = len(streaming_data["timestamp_ms"]) / (streaming_data["timestamp_ms"][-1] - streaming_data["timestamp_ms"][0])
-            draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            if INFO:
+                draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            else:
+                np.savetxt(os.path.join(save_path, f"freq_{freq}.txt"), np.array([]))
         else:
             freq = 0
         np.save(os.path.join(save_path, "ft.npy"), np.array(streaming_data["ft"], dtype=float))
-        draw_items(np.array(streaming_data["ft"], dtype=float), os.path.join(save_path, "ft.png"))
+        if INFO:
+            draw_items(np.array(streaming_data["ft"], dtype=float), os.path.join(save_path, "ft.png"))
     
     def collect_streaming(self, collect:bool=True) -> None:
         self._collect_streaming_data = collect
@@ -247,6 +254,8 @@ class M8128(FTSensorBase):
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} get_streaming data size: {len(streaming_data['timestamp_ms'])}")
         elif hasattr(self, "streaming_array"):
             streaming_data = {
                 "ft": [np.copy(self.streaming_array["ft"])], 
@@ -382,6 +391,7 @@ class M8128(FTSensorBase):
 
 
 if __name__ == '__main__':
+    import tqdm
     sensor = M8128(id='COM9', baudrate=115200, port=4008, fps=300, comm='serial', name='M8128')
     streaming = False
     shm = False

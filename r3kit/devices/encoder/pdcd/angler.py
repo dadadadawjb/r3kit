@@ -4,6 +4,7 @@ import struct
 import time
 import gc
 import tqdm
+from rich import print
 import numpy as np
 from threading import Thread, Lock, Event
 from multiprocessing import shared_memory, Manager
@@ -14,10 +15,7 @@ import serial
 from r3kit.devices.encoder.base import EncoderBase
 from r3kit.devices.encoder.pdcd.config import *
 from r3kit.utils.vis import draw_time, draw_items
-
-'''
-Modified from: https://github.com/Galaxies99/easyrobot/blob/main/easyrobot/encoder/angle.py
-'''
+from r3kit import DEBUG, INFO
 
 
 def crc16(msg:bytes) -> Tuple[int, str, str]:
@@ -99,7 +97,8 @@ class Angler(EncoderBase):
             actual_crc_H = hex(rei[6])[2:].zfill(2)
             if not (crc_L == actual_crc_L and crc_H == actual_crc_H):
                 crc_string = ' '.join([hex(x)[2:].zfill(2) for x in rei[:5]])
-                print(f"Warning: Encoder {rei[0]} CRC error: expected {crc_L}({rei[5]}) {crc_H}({rei[6]}), got {actual_crc_L} {actual_crc_H}, CRC String: {crc_string}")
+                if INFO:
+                    print(f"Warning: Encoder {rei[0]} CRC error: expected {crc_L}({rei[5]}) {crc_H}({rei[6]}), got {actual_crc_L} {actual_crc_H}, CRC String: {crc_string}")
                 if self._strict:
                     return self._read() # retry reading
                 else:
@@ -183,6 +182,8 @@ class Angler(EncoderBase):
         self.thread.join()
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} stop_streaming data size: {len(streaming_data['timestamp_ms'])}")
             self.streaming_data = {
                 "angle": [], 
                 "timestamp_ms": []
@@ -209,11 +210,15 @@ class Angler(EncoderBase):
         np.save(os.path.join(save_path, "timestamps.npy"), np.array(streaming_data["timestamp_ms"], dtype=float))
         if len(streaming_data["timestamp_ms"]) > 1:
             freq = len(streaming_data["timestamp_ms"]) / (streaming_data["timestamp_ms"][-1] - streaming_data["timestamp_ms"][0])
-            draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            if INFO:
+                draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            else:
+                np.savetxt(os.path.join(save_path, f"freq_{freq}.txt"), np.array([]))
         else:
             freq = 0
         np.save(os.path.join(save_path, "angle.npy"), np.array(streaming_data["angle"], dtype=float))
-        draw_items(np.array(streaming_data["angle"], dtype=float), os.path.join(save_path, "angle.png"))
+        if INFO:
+            draw_items(np.array(streaming_data["angle"], dtype=float), os.path.join(save_path, "angle.png"))
     
     def collect_streaming(self, collect:bool=True) -> None:
         self._collect_streaming_data = collect
@@ -228,6 +233,8 @@ class Angler(EncoderBase):
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} get_streaming data size: {len(streaming_data['timestamp_ms'])}")
         elif hasattr(self, "streaming_array"):
             streaming_data = {
                 "angle": [np.copy(self.streaming_array["angle"])], 

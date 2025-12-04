@@ -8,6 +8,7 @@ import ctypes
 from ctypes import cast, byref, POINTER
 import time
 import gc
+from rich import print
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
 from threading import Thread, Lock, Event
@@ -20,6 +21,7 @@ from r3kit.devices.camera.base import CameraBase
 from r3kit.devices.camera.vive.context_object import ContextObject
 from r3kit.devices.camera.vive.config import *
 from r3kit.utils.vis import draw_time
+from r3kit import DEBUG, INFO
 
 
 class Ultimate(CameraBase):
@@ -253,6 +255,8 @@ class Ultimate(CameraBase):
         self.thread.join()
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} stop_streaming data size: {len(streaming_data['timestamp_ms'])}")
             self.streaming_data = {
                 "xyz": [], 
                 "quat": [], 
@@ -281,7 +285,10 @@ class Ultimate(CameraBase):
         np.save(os.path.join(save_path, "timestamps.npy"), np.array(streaming_data["timestamp_ms"], dtype=float))
         if len(streaming_data["timestamp_ms"]) > 1:
             freq = len(streaming_data["timestamp_ms"]) / (streaming_data["timestamp_ms"][-1] - streaming_data["timestamp_ms"][0])
-            draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            if INFO:
+                draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            else:
+                np.savetxt(os.path.join(save_path, f"freq_{freq}.txt"), np.array([]))
         else:
             freq = 0
         np.save(os.path.join(save_path, "xyz.npy"), np.array(streaming_data["xyz"], dtype=float))
@@ -300,6 +307,8 @@ class Ultimate(CameraBase):
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):
             streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} get_streaming data size: {len(streaming_data['timestamp_ms'])}")
         elif hasattr(self, "streaming_array"):
             streaming_data = {
                 "xyz": [np.copy(self.streaming_array["xyz"])], 

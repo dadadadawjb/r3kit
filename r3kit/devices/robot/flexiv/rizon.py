@@ -3,6 +3,7 @@ import time
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
 import flexivrdk
+assert flexivrdk.__version__ == '1.8.0', "Only support Flexiv RDK v1.8.0, current version is {flexivrdk.__version__}"
 
 from r3kit.devices.robot.base import RobotBase
 from r3kit.devices.robot.flexiv.config import *
@@ -12,12 +13,12 @@ from r3kit.utils.transformation import xyzquat2mat, mat2xyzquat, delta_xyz, delt
 class Rizon(RobotBase):
     DOF:int = 7
 
-    def __init__(self, id:str=RIZON_ID, gripper:bool=True, name:str='Rizon') -> None:
+    def __init__(self, id:str=RIZON_ID, gripper:bool=True, name:str='Rizon', tool_name:str='Flange') -> None:
         super().__init__(name)
 
         self.robot = flexivrdk.Robot(id)
         if self.robot.fault():
-            if not robot.ClearFault():
+            if not self.robot.ClearFault():
                 raise RuntimeError(f"Failed to clear fault for robot {name}")
         self.robot.Enable()
         seconds_waited = 0
@@ -26,13 +27,20 @@ class Rizon(RobotBase):
             seconds_waited += 1
             if seconds_waited == RIZON_OPERATIONAL_WAIT_TIME:
                 raise RuntimeError(f"Failed to enable robot {name}")
+        self.robot.SwitchMode(flexivrdk.Mode.IDLE)
+        tool = flexivrdk.Tool(self.robot)
+        if tool.exist(tool_name):
+            tool.Switch(tool_name)
+        else:
+            raise RuntimeError(f"{tool_name} tool not found")
+        print(f"{tool_name} tool switched")
         self.motion_mode('primitive')
         self.block(True)
         info = self.robot.info()
         self._joint_limits = (np.array(info.q_min), np.array(info.q_max))
         if gripper:
             self.gripper = flexivrdk.Gripper(self.robot)
-            gripper.Init()
+            self.gripper.Init()
             info = self.gripper.states()
             self._gripper_limits = (0, float(info.max_width))
         else:
@@ -44,6 +52,11 @@ class Rizon(RobotBase):
         if hasattr(self, 'gripper') and self.gripper is not None:
             self.gripper.Stop()
     
+    def sleep(self, sleep_time:float, wait_stopped_interval:float=0.001) -> None:
+        while not self.robot.stopped():
+            time.sleep(wait_stopped_interval)
+        time.sleep(sleep_time)
+
     def motion_mode(self, mode:str) -> None:
         if mode == 'primitive':
             self.robot.SwitchMode(flexivrdk.Mode.NRT_PRIMITIVE_EXECUTION)
@@ -65,7 +78,10 @@ class Rizon(RobotBase):
         if self.mode == 'primitive':
             self.robot.ExecutePrimitive("Home", dict())
             if self.blocking:
+                time_start = time.time()
                 while not self.robot.primitive_states()["reachedTarget"]:
+                    if time.time() - time_start > RIZON_BLOCK_TIMEOUT:
+                        return
                     time.sleep(RIZON_BLOCK_WAIT_TIME)
             else:
                 pass
@@ -97,7 +113,10 @@ class Rizon(RobotBase):
         if self.mode == 'primitive':
             self.robot.ExecutePrimitive("MoveJ", {"target": np.rad2deg(joints).tolist()})
             if self.blocking:
-                while not robot.primitive_states()["reachedTarget"]:
+                time_start = time.time()
+                while not self.robot.primitive_states()["reachedTarget"]:
+                    if time.time() - time_start > RIZON_BLOCK_TIMEOUT:
+                        return
                     time.sleep(RIZON_BLOCK_WAIT_TIME)
             else:
                 pass
@@ -105,7 +124,10 @@ class Rizon(RobotBase):
             self.robot.SendJointPosition(joints.tolist(), velocities.tolist(), max_vel.tolist(), max_acc.tolist())
             if self.blocking:
                 error = float('inf')
+                time_start = time.time()
                 while error > RIZON_JOINT_EPSILON:
+                    if time.time() - time_start > RIZON_BLOCK_TIMEOUT:
+                        return
                     time.sleep(RIZON_BLOCK_WAIT_TIME)
                     error = np.abs(self.joint_read() - joints).max()
             else:
@@ -135,7 +157,10 @@ class Rizon(RobotBase):
         self.gripper.Move(width, velocity)
         if self.blocking:
             error = float('inf')
+            time_start = time.time()
             while error > RIZON_GRIPPER_EPSILON:
+                if time.time() - time_start > RIZON_BLOCK_TIMEOUT:
+                    return
                 time.sleep(RIZON_BLOCK_WAIT_TIME)
                 error = np.abs(self.gripper_read() - width)
         else:
@@ -180,7 +205,10 @@ class Rizon(RobotBase):
             if self.blocking:
                 if pure_motion:
                     error_xyz, error_quat = float('inf'), float('inf')
+                    time_start = time.time()
                     while error_xyz > RIZON_TCP_POSE_EPSILON[0] or error_quat > RIZON_TCP_POSE_EPSILON[1]:
+                        if time.time() - time_start > RIZON_BLOCK_TIMEOUT:
+                            return
                         time.sleep(RIZON_BLOCK_WAIT_TIME)
                         current_pose = self.tcp_read()
                         target_pose = pose
@@ -208,7 +236,7 @@ class Rizon(RobotBase):
             original_mode = None
         
         self.robot.ExecutePrimitive("ZeroFTSensor", dict())
-        while robot.busy():
+        while not self.robot.primitive_states()["terminated"]:
             time.sleep(RIZON_BLOCK_WAIT_TIME)
         
         if original_mode is not None:

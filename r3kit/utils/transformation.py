@@ -138,6 +138,11 @@ def delta_xyz(xyz1:np.ndarray, xyz2:np.ndarray) -> float:
     delta = xyz1 - xyz2
     return xyz2len(delta)
 
+def delta_dir(dir1:np.ndarray, dir2:np.ndarray) -> float:
+    dot = np.dot(dir1, dir2)
+    theta = np.arccos(np.clip(dot, -1, 1))
+    theta = np.clip(theta, 0, np.pi)
+    return theta
 def delta_quat(quat1:np.ndarray, quat2:np.ndarray) -> float:
     delta = Rot.from_quat(quat1).inv() * Rot.from_quat(quat2) # represented in quat1
     delta_value = delta.magnitude()

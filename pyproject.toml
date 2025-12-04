@@ -30,6 +30,7 @@ dependencies = [
   "yourdfpy",
   "pynput",
   "tqdm",
+  "rich"
 ]
 
 [project.optional-dependencies]

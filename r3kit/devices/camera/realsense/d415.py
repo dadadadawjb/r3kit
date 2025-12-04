@@ -3,6 +3,7 @@ import shutil
 from typing import Tuple, List, Union, Dict, Optional
 import time
 import gc
+from rich import print
 import numpy as np
 import cv2
 from threading import Lock, Thread
@@ -14,6 +15,7 @@ from r3kit.devices.camera.base import CameraBase
 from r3kit.devices.camera.utils import inpaint
 from r3kit.devices.camera.realsense.config import *
 from r3kit.utils.vis import draw_time, save_imgs, save_img
+from r3kit import DEBUG, INFO
 
 
 class D415(CameraBase):
@@ -64,6 +66,9 @@ class D415(CameraBase):
             self.depth_image_shape = depth_image.shape
         
         self.in_streaming = False
+        self.set_streaming_save_path(os.path.join(TEMP_DIR, self.name))
+        if INFO:
+            print(f"[INFO-r3kit] {self.name} streaming save path: {self._streaming_save_path}")
 
     def get(self) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         if not self.in_streaming:
@@ -121,9 +126,9 @@ class D415(CameraBase):
                 # TODO: ugly realtime write
                 self._write_flag = True
                 self._write_idx = 0
-                if os.path.exists(os.path.join(TEMP_DIR, self.name)):
-                    shutil.rmtree(os.path.join(TEMP_DIR, self.name))
-                self._streaming_data_writer = Thread(target=self._write_streaming_data, args=(os.path.join(TEMP_DIR, self.name),))
+                if os.path.exists(self._streaming_save_path):
+                    shutil.rmtree(self._streaming_save_path)
+                self._streaming_data_writer = Thread(target=self._write_streaming_data, args=(self._streaming_save_path,))
                 self._streaming_data_writer.start()
             else:
                 self.streaming_manager = Manager()
@@ -156,9 +161,16 @@ class D415(CameraBase):
         if hasattr(self, "streaming_data"):
             # TODO: ugly realtime write
             self._write_flag = False
+            if DEBUG:
+                writer_time = time.time()
             self._streaming_data_writer.join()
+            if DEBUG:
+                writer_time = time.time() - writer_time
+                print(f"[DEBUG-r3kit] {self.name} stop_writer join time: {writer_time} seconds")
 
             streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} stop_streaming data size: {len(streaming_data['timestamp_ms'])}")
             self.streaming_data = {
                 "color": [], 
                 "timestamp_ms": []
@@ -188,7 +200,7 @@ class D415(CameraBase):
     
     def save_streaming(self, save_path:str, streaming_data:dict) -> None:
         has_writer = False
-        for root, dirs, files in os.walk(os.path.join(TEMP_DIR, self.name)):
+        for root, dirs, files in os.walk(self._streaming_save_path):
             if len(files) > 0:
                 has_writer = True
                 break
@@ -207,29 +219,42 @@ class D415(CameraBase):
         np.save(os.path.join(save_path, "timestamps.npy"), np.array(streaming_data["timestamp_ms"], dtype=float))
         if len(streaming_data["timestamp_ms"]) > 1:
             freq = len(streaming_data["timestamp_ms"]) / (streaming_data["timestamp_ms"][-1] - streaming_data["timestamp_ms"][0])
-            draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            if INFO:
+                draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            else:
+                np.savetxt(os.path.join(save_path, f"freq_{freq}.txt"), np.array([]))
         else:
             freq = 0
         # os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
         # if self._depth:
         #     os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
         idx_bias = 0
-        if has_writer:
-            # os.rename(os.path.join(TEMP_DIR, self.name, 'color'), os.path.join(save_path, 'color'))
+        if has_writer and not os.path.samefile(save_path, self._streaming_save_path):
+            if DEBUG:
+                clean_time = time.time()
+            # os.rename(os.path.join(self._streaming_save_path, 'color'), os.path.join(save_path, 'color'))
             # if self._depth:
-            #     os.rename(os.path.join(TEMP_DIR, self.name, 'depth'), os.path.join(save_path, 'depth'))
-            shutil.move(os.path.join(TEMP_DIR, self.name, 'color'), os.path.join(save_path, 'color'))
+            #     os.rename(os.path.join(self._streaming_save_path, 'depth'), os.path.join(save_path, 'depth'))
+            shutil.move(os.path.join(self._streaming_save_path, 'color'), os.path.join(save_path, 'color'))
             if self._depth:
-                shutil.move(os.path.join(TEMP_DIR, self.name, 'depth'), os.path.join(save_path, 'depth'))
+                shutil.move(os.path.join(self._streaming_save_path, 'depth'), os.path.join(save_path, 'depth'))
             idx_bias = self._write_idx
-            shutil.rmtree(os.path.join(TEMP_DIR, self.name))
+            shutil.rmtree(self._streaming_save_path)
+            if DEBUG:
+                clean_time = time.time() - clean_time
+                print(f"[DEBUG-r3kit] {self.name} clean time: {clean_time} seconds")
         else:
             os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
             if self._depth:
                 os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
+        if DEBUG:
+            save_time = time.time()
         save_imgs(os.path.join(save_path, 'color'), streaming_data["color"], idx_bias=idx_bias)
         if self._depth:
             save_imgs(os.path.join(save_path, 'depth'), streaming_data["depth"], idx_bias=idx_bias)
+        if DEBUG:
+            save_time = time.time() - save_time
+            print(f"[DEBUG-r3kit] {self.name} save time: {save_time} seconds")
     
     def _write_streaming_data(self, save_path:str) -> None:
         os.makedirs(save_path, exist_ok=True)
@@ -253,7 +278,12 @@ class D415(CameraBase):
                 if self._depth:
                     save_img(self._write_idx, os.path.join(save_path, 'depth'), depth_img)
                 self._write_idx += 1
+                if DEBUG:
+                    print(f"[DEBUG-r3kit] {self.name} writer {self._write_idx}")
     
+    def set_streaming_save_path(self, save_path:str) -> None:
+        self._streaming_save_path = save_path
+
     def collect_streaming(self, collect:bool=True) -> None:
         # NOTE: only valid for no-custom-callback
         self._collect_streaming_data = collect
@@ -269,9 +299,16 @@ class D415(CameraBase):
         if hasattr(self, "streaming_data"):
             # TODO: ugly realtime write
             self._write_flag = False
+            if DEBUG:
+                join_time = time.time()
             self._streaming_data_writer.join()
+            if DEBUG:
+                join_time = time.time() - join_time
+                print(f"[DEBUG-r3kit] {self.name} get_writer join time: {join_time} seconds")
 
             streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} get_streaming data size: {len(streaming_data['timestamp_ms'])}")
         elif hasattr(self, "streaming_array"):
             streaming_data = {
                 "color": [np.copy(self.streaming_array["color"])], 
@@ -289,7 +326,12 @@ class D415(CameraBase):
         if hasattr(self, "streaming_data"):
             # TODO: ugly realtime write
             self._write_flag = False
+            if DEBUG:
+                join_time = time.time()
             self._streaming_data_writer.join()
+            if DEBUG:
+                join_time = time.time() - join_time
+                print(f"[DEBUG-r3kit] {self.name} reset_writer join time: {join_time} seconds")
 
             self.streaming_data['color'].clear()
             self.streaming_data['timestamp_ms'].clear()
@@ -319,9 +361,9 @@ class D415(CameraBase):
             # TODO: ugly realtime write
             self._write_flag = True
             self._write_idx = 0
-            if os.path.exists(os.path.join(TEMP_DIR, self.name)):
-                shutil.rmtree(os.path.join(TEMP_DIR, self.name))
-            self._streaming_data_writer = Thread(target=self._write_streaming_data, args=(os.path.join(TEMP_DIR, self.name),))
+            if os.path.exists(self._streaming_save_path):
+                shutil.rmtree(self._streaming_save_path)
+            self._streaming_data_writer = Thread(target=self._write_streaming_data, args=(self._streaming_save_path,))
             self._streaming_data_writer.start()
         else:
             self.streaming_manager = Manager()

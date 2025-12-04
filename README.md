@@ -27,6 +27,8 @@ Additional manual dependencies (see `docs` to set up):
 Nearly every class is accompanied by a demonstration in the main function.
 Some more complex use cases can be found in `examples`.
 
+> See more outputs by set environment variables `R3KIT_DEBUG=True` and/or `R3KIT_INFO=True`.
+
 ### Devices
 
 #### Robot
