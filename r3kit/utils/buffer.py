@@ -198,7 +198,7 @@ class ActBuffer:
             act = {}
             for name in self.act_names:
                 act[name] = np.copy(self.shm_arrays[idx][name])
-        self.seti(idx + 1)
+        self.seti((idx + 1) % self.num_act)
         return act
     
     def setf(self, flag:bool) -> None:

@@ -48,6 +48,7 @@ def main():
         json.dump(obs_dict, f, indent=4)
     with open(os.path.join(meta_path, 'act_dict.json'), 'w') as f:
         json.dump(act_dict, f, indent=4)
+    print("=========> Initialized")
     
     # rollout
     if num_steps < 0:
@@ -75,13 +76,13 @@ def main():
             act_buffer.setf(False)
             obs_buffer.add1(o)
             obs_buffer.setf(True)
-            print("Add obs", o.keys(), step_idx)
+            print(f"=========> Add obs {step_idx}")
         
         # get act
         while not act_buffer.getf():
             time.sleep(sleep_time)
         a = act_buffer.get1()
-        print("Get act", a.keys(), step_idx)
+        print(f"=========> Get act {step_idx}")
         # execute act
         joints = a['joints']
         if vis:

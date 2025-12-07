@@ -1,4 +1,5 @@
 import os
+from typing import Tuple
 
 from r3kit.devices.encoder.pdcd.angler import Angler
 from r3kit.devices.camera.realsense.d415 import D415
@@ -19,7 +20,7 @@ def main():
     encoder = Angler(id=encoder_id, index=encoder_index, fps=0, baudrate=encoder_baudrate, 
                      gap=-1, strict=True, name=encoder_name)
     camera = D415(id=camera_id, depth=camera_depth, name=camera_name)
-    devices = [encoder, camera]
+    devices:Tuple[Angler, D415] = [encoder, camera]
 
     input("Enter to start...")
     for device in devices:

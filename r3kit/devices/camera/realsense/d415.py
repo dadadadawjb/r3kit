@@ -228,7 +228,7 @@ class D415(CameraBase):
         # os.makedirs(os.path.join(save_path, 'color'), exist_ok=True)
         # if self._depth:
         #     os.makedirs(os.path.join(save_path, 'depth'), exist_ok=True)
-        idx_bias = 0
+        idx_bias = self._write_idx if has_writer else 0
         if has_writer and not os.path.samefile(save_path, self._streaming_save_path):
             if DEBUG:
                 clean_time = time.time()
@@ -238,7 +238,6 @@ class D415(CameraBase):
             shutil.move(os.path.join(self._streaming_save_path, 'color'), os.path.join(save_path, 'color'))
             if self._depth:
                 shutil.move(os.path.join(self._streaming_save_path, 'depth'), os.path.join(save_path, 'depth'))
-            idx_bias = self._write_idx
             shutil.rmtree(self._streaming_save_path)
             if DEBUG:
                 clean_time = time.time() - clean_time

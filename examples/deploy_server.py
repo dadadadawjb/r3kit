@@ -30,8 +30,10 @@ def main():
         act_dict = json.load(f)
     obs_buffer = ObsBuffer(num_obs=num_obs, obs_dict=obs_dict, create=False)
     act_buffer = ActBuffer(num_act=num_actions, act_dict=act_dict, create=False)
+    print("=========> Initialized")
 
     # rollout
+    idx = 0
     policy.eval()
     with torch.inference_mode():
         while True:
@@ -42,6 +44,7 @@ def main():
             if len(o) < num_obs:
                 o = [o[0]] * (num_obs - len(o)) + o
             obs_buffer.setf(False)
+            print(f"=========> Get obs {idx}")
 
             # preprocess obs
             o = preprocess_obs(o)
@@ -53,8 +56,10 @@ def main():
             a = postprocess_act(a)
 
             # set act
-            act_buffer.setn(a)
+            act_buffer.addn(a)
             act_buffer.setf(True)
+            print(f"=========> Add act {idx}")
+            idx += 1
 
 
 if __name__ == '__main__':

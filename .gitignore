@@ -5,5 +5,7 @@ __pycache__/
 
 *.egg-info/
 
+build/
+
 r3kit/devices/.meta/
 r3kit/devices/.temp/
