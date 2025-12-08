@@ -18,3 +18,5 @@ D415_STREAMS = [
     (rs.stream.depth, 640, 480, rs.format.z16, 30), 
     (rs.stream.color, 640, 480, rs.format.bgr8, 30)
 ]
+
+REALSENSE_RESET_TIME = 5

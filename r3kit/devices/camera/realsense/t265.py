@@ -42,7 +42,15 @@ class T265(CameraBase):
         pose_sensor.set_option(rs.option.enable_pose_jumping, 0)
         # pose_sensor.set_option(rs.option.enable_relocalization, 0)
         self.pipeline.start(self.config)
-        frames = self.pipeline.wait_for_frames()
+        try:
+            frames = self.pipeline.wait_for_frames()
+        except RuntimeError:
+            if DEBUG:
+                print(f"[DEBUG-r3kit] {self.name} failed to get frames, resetting...")
+            device = self.pipeline_profile.get_device()
+            device.hardware_reset()
+            time.sleep(REALSENSE_RESET_TIME)
+            frames = self.pipeline.wait_for_frames()
         if self._image:
             f1 = frames.get_fisheye_frame(1).as_video_frame()
             f2 = frames.get_fisheye_frame(2).as_video_frame()

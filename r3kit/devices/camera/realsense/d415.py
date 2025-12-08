@@ -43,7 +43,15 @@ class D415(CameraBase):
         if self._depth:
             depth_sensor = self.pipeline_profile.get_device().first_depth_sensor()
             self.depth_scale = depth_sensor.get_depth_scale()
-        frames = self.pipeline.wait_for_frames()
+        try:
+            frames = self.pipeline.wait_for_frames()
+        except RuntimeError:
+            if DEBUG:
+                print(f"[DEBUG-r3kit] {self.name} failed to get frames, resetting...")
+            device = self.pipeline_profile.get_device()
+            device.hardware_reset()
+            time.sleep(REALSENSE_RESET_TIME)
+            frames = self.pipeline.wait_for_frames()
         if self._depth:
             color_frame = frames.get_color_frame().as_video_frame()
             depth_frame = frames.get_depth_frame().as_depth_frame()

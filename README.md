@@ -90,6 +90,15 @@ for pose in poses:
 offset = calibor.run()
 ```
 
+#### Kinematics
+```python
+from r3kit.algos.kinematics.kinematics import URDFKinematics
+
+robot = URDFKinematics(urdf_path, end_link, base_link)
+tcp_pose = robot.fk(joints)
+joints, success, iters = robot.ik(tcp_pose)
+```
+
 #### Alignment
 ```python
 from r3kit.algos.align.umeyama import umeyama_align # more similar alternatives can be found
