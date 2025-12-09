@@ -92,7 +92,7 @@ offset = calibor.run()
 
 #### Kinematics
 ```python
-from r3kit.algos.kinematics.kinematics import URDFKinematics
+from r3kit.algos.kinematics.urdf import URDFKinematics
 
 robot = URDFKinematics(urdf_path, end_link, base_link)
 tcp_pose = robot.fk(joints)
