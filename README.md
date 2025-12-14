@@ -41,10 +41,10 @@ joints = robot.joint_read()
 
 #### Camera
 ```python
-from r3kit.devices.camera.realsense.l515 import L515 # more similar alternatives can be found
+from r3kit.devices.camera.realsense.general import RealSenseCamera
 
-camera = L515()
-image = camera.get()
+camera = RealSenseCamera()
+data = camera.get()
 ```
 
 #### FTSensor

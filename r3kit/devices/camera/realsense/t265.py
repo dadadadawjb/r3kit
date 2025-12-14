@@ -19,6 +19,9 @@ from r3kit import DEBUG, INFO
 
 
 class T265(CameraBase):
+    """
+    Deprecated: use `general.RealSenseCamera` instead.
+    """
     def __init__(self, id:Optional[str]=T265_ID, image:bool=True, name:str='T265') -> None:
         super().__init__(name=name)
         self._image = image

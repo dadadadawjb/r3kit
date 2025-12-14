@@ -92,7 +92,7 @@ class FT300(FTSensorBase):
                 raise AttributeError
         return data
     
-    def start_streaming(self, callback:Optional[callable]=None) -> None:
+    def start_streaming(self, callback:Optional[callable]=None, **kwargs) -> None:
         if not hasattr(self, "_collect_streaming_data"):
             self._collect_streaming_data = True
         if not hasattr(self, "_shm"):
@@ -210,7 +210,7 @@ class FT300(FTSensorBase):
             raise AttributeError
         return streaming_data
     
-    def reset_streaming(self) -> None:
+    def reset_streaming(self, **kwargs) -> None:
         # NOTE: only valid for non-custom-callback
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):

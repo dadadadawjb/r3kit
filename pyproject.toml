@@ -30,7 +30,8 @@ dependencies = [
   "yourdfpy",
   "pynput",
   "tqdm",
-  "rich"
+  "rich",
+  "typed-argument-parser"
 ]
 
 [project.optional-dependencies]
@@ -56,18 +57,6 @@ flexiv = [
   "spdlog",
 ]
 franka = [
-  "frankx",
-]
-all = [
-  "pyserial",
-  "pymodbus",
-  "pyrealsense2==2.53.1.4623",
-  "pyopenxr",
-  "xensesdk",
-  "xensegripper",
-  "openvr",
-  "flexivrdk",
-  "spdlog",
   "frankx",
 ]
 

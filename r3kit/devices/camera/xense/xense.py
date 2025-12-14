@@ -77,7 +77,7 @@ class Xense(CameraBase):
             else:
                 raise AttributeError
 
-    def start_streaming(self, callback: Optional[callable] = None) -> None:
+    def start_streaming(self, callback:Optional[callable]=None, **kwargs) -> None:
         self.in_streaming = True
         if self._shm is None:
             if callback is None:
@@ -188,7 +188,7 @@ class Xense(CameraBase):
             raise AttributeError
         return streaming_data
 
-    def reset_streaming(self) -> None:
+    def reset_streaming(self, **kwargs) -> None:
         assert not self._collect_streaming_data
         if hasattr(self, "streaming_data"):
             self.streaming_data['rectify'].clear()
