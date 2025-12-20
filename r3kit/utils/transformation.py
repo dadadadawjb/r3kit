@@ -91,6 +91,46 @@ def median_dir(dirs:np.ndarray) -> np.ndarray:
     return dirs[j_star]
 
 
+def rot6d2R(rot6d:np.ndarray=np.array([1., 0., 0., 0., 1., 0.]), eps:float=1e-8) -> np.ndarray:
+    """
+    rot6d without constraint
+    """
+    a, b = rot6d[:3], rot6d[3:]
+
+    a_n = np.linalg.norm(a)
+    if a_n < eps:
+        r1 = a * 0.0
+    else:
+        r1 = a / a_n
+
+    # Remove projection of b onto r1 to enforce orthogonality
+    b_ortho = b - np.dot(r1, b) * r1
+    b_ortho_n = np.linalg.norm(b_ortho)
+    if b_ortho_n < eps:
+        r2 = b_ortho * 0.0
+    else:
+        r2 = b_ortho / b_ortho_n
+
+    # If degenerate (a≈0 or b parallel to a), provide a fallback r2
+    if np.linalg.norm(r2) < eps:
+        # Pick a vector that is not parallel to r1
+        fallback = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+        if abs(np.dot(fallback, r1)) > 0.9:
+            fallback = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+        b_ortho = fallback - np.dot(r1, fallback) * r1
+        r2 = b_ortho / np.linalg.norm(b_ortho)
+
+    r3 = np.cross(r1, r2)
+
+    R = np.stack([r1, r2, r3], axis=1)
+    return R
+
+def R2rot6d(R:np.ndarray=np.eye(3)) -> np.ndarray:
+    r1 = R[:, 0]
+    r2 = R[:, 1]
+    return np.concatenate([r1, r2], axis=0)
+
+
 def xyzrot2mat(xyz:np.ndarray=np.zeros(3), rot:np.ndarray=np.eye(3)) -> np.ndarray:
     pose_4x4 = np.eye(4)
     pose_4x4[:3, :3] = rot
@@ -112,6 +152,20 @@ def mat2xyzquat(pose_4x4:np.ndarray=np.eye(4)) -> Tuple[np.ndarray, np.ndarray]:
     xyz = pose_4x4[:3, 3]
     quat = Rot.from_matrix(pose_4x4[:3, :3]).as_quat()
     return (xyz, quat)
+
+def xyzrot6d2mat(xyz:np.ndarray=np.zeros(3), rot6d:np.ndarray=np.array([1., 0., 0., 0., 1., 0.])) -> np.ndarray:
+    """
+    rot6d without constraint
+    """
+    pose_4x4 = np.eye(4)
+    pose_4x4[:3, :3] = rot6d2R(rot6d)
+    pose_4x4[:3, 3] = xyz
+    return pose_4x4
+
+def mat2xyzrot6d(pose_4x4:np.ndarray=np.eye(4)) -> Tuple[np.ndarray, np.ndarray]:
+    xyz = pose_4x4[:3, 3]
+    rot6d = R2rot6d(pose_4x4[:3, :3])
+    return (xyz, rot6d)
 
 def sRt2smat(s:float, R:np.ndarray, t:np.ndarray) -> np.ndarray:
     smat = np.eye(4)
