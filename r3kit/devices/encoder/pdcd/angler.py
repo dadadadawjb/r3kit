@@ -3,7 +3,6 @@ from typing import Tuple, List, Dict, Union, Optional
 import struct
 import time
 import gc
-import tqdm
 from rich import print
 import numpy as np
 from threading import Thread, Lock, Event
@@ -36,14 +35,13 @@ def crc16(msg:bytes) -> Tuple[int, str, str]:
 
 
 class Angler(EncoderBase):
-    def __init__(self, id:str=ANGLER_ID, index:List[int]=ANGLER_INDEX, fps:int=ANGLER_FPS, 
+    def __init__(self, id:str=ANGLER_ID, index:List[int]=ANGLER_INDEX, 
                  baudrate:int=ANGLER_BAUDRATE, gap:float=ANGLER_GAP, strict:bool=True, name:str='Angler') -> None:
         super().__init__(name=name)
 
         self._id = id
         self._index = index
         self._num = len(index)
-        self._fps = fps
         self._baudrate = baudrate
         self._gap = gap
         self._broadcast = self._gap < 0
@@ -288,9 +286,6 @@ class Angler(EncoderBase):
     
     def _streaming_data(self, callback:Optional[callable]=None):
         while self.in_streaming.is_set():
-            # fps
-            # time.sleep(1/self._fps - self._gap * self._num)
-
             # get data
             if not self._collect_streaming_data:
                 continue
@@ -329,8 +324,9 @@ class Angler(EncoderBase):
 
 
 if __name__ == "__main__":
-    # encoder = Angler(id='/dev/ttyUSB0', index=[2], baudrate=115200, fps=30, gap=0.002, name='Angler')
-    encoder = Angler(id='COM8', index=[1,2,3,4,5], baudrate=1000000, fps=0, gap=-1, strict=True, name='Angler')
+    import tqdm
+    # encoder = Angler(id='/dev/ttyUSB0', index=[2], baudrate=115200, gap=0.002, name='Angler')
+    encoder = Angler(id='COM8', index=[1,2,3,4,5], baudrate=1000000, gap=-1, strict=True, name='Angler')
     streaming = False
     shm = False
 

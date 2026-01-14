@@ -23,6 +23,9 @@ class VRTrackedDevice(object):
 
     def is_charging(self):
         return self.vr.getBoolTrackedDeviceProperty(self.index, openvr.Prop_DeviceIsCharging_Bool)
+    
+    def get_role(self):
+        return self.vr.getStringTrackedDeviceProperty(self.index, openvr.Prop_ControllerType_String)
 
     def get_T(self, pose=None):
         pose_mat = self.get_pose_matrix()
@@ -55,13 +58,14 @@ class ViveTrackerModule:
     def __del__(self):
         openvr.shutdown()
 
-    def return_selected_devices(self, device_keys:List[str]) -> List[VRTrackedDevice]:
+    def return_selected_devices(self, roles:List[str]) -> List[VRTrackedDevice]:
         selected_devices = []
-        for key in device_keys:
+        for role in roles:
+            key = 'vive_tracker_' + role
             if key in self.devices:
                 selected_devices.append(self.devices[key])
             else:
-                raise ValueError(f"Device {key} not found")
+                raise ValueError(f"Tracker {role} not found")
         return selected_devices
 
     def get_pose(self):
@@ -90,7 +94,8 @@ class ViveTrackerModule:
             self.devices[device_name] = VRTrackedDevice(self.vr, i, "HMD")
             self.device_index_map[i] = device_name
         elif device_class == openvr.TrackedDeviceClass_GenericTracker:
-            device_name = "tracker_" + str(len(self.object_names["Tracker"]) + 1)
+            # device_name = "tracker_" + str(len(self.object_names["Tracker"]) + 1)
+            device_name = self.vr.getStringTrackedDeviceProperty(i, openvr.Prop_ControllerType_String)
             self.object_names["Tracker"].append(device_name)
             self.devices[device_name] = VRTrackedDevice(self.vr, i, "Tracker")
             self.device_index_map[i] = device_name

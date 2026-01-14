@@ -261,15 +261,18 @@ class VIVE3(TrackerBase):
 
 
 if __name__ == "__main__":
-    tracker = VIVE3(id=['tracker_1', 'tracker_2'], name='VIVE3')
-    streaming = False
-    shm = False
+    import tqdm
+    tracker = VIVE3(id=['left_foot'], name='VIVE3')
+    streaming = True
+    shm = True
 
     if not streaming:
-        while True:
-            data = tracker.get()
-            print(data)
-            time.sleep(0.1)
+        np.set_printoptions(precision=3, floatmode='fixed', suppress=True)
+        with tqdm.tqdm() as pbar:
+            while True:
+                data = tracker.get()
+                pbar.update()
+                pbar.set_description(str(data['xyz']) + ' ' + str(data['quat']))
     else:
         tracker.collect_streaming(collect=True)
         tracker.shm_streaming(shm='VIVE3' if shm else None)
