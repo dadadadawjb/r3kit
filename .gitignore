@@ -5,6 +5,8 @@ __pycache__/
 
 *.egg-info/
 
+.vscode/
+
 build/
 
 r3kit/devices/.meta/

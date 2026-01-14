@@ -47,6 +47,14 @@ camera = RealSenseCamera()
 data = camera.get()
 ```
 
+#### Tracker
+```python
+from r3kit.devices.tracker.vive.ultimate import Ultimate
+
+tracker = Ultimate()
+data = tracker.get()
+```
+
 #### FTSensor
 ```python
 from r3kit.devices.ftsensor.ati.pyati import PyATI # more similar alternatives can be found

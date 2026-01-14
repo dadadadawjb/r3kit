@@ -1,2 +1,0 @@
-VIVE_TRACKER_FPS = 50
-

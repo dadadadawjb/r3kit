@@ -1,32 +1,47 @@
+from typing import List
 import time
-import sys
-import openvr
-import math
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
+import openvr
 
 
-class ViveTrackerUpdater:
-    def __init__(self, names=["tracker_1", "tracker_2"]):
-        self.vive_tracker_module = ViveTrackerModule()
-        self.vive_tracker_module.print_discovered_objects()
-        self.device_key = names
-        self.tracking_devices = self.vive_tracker_module.return_selected_devices(self.device_key)
+class VRTrackedDevice(object):
+    def __init__(self, vr_obj, index, device_class):
+        self.device_class = device_class
+        self.index = index
+        self.vr = vr_obj
+        self.T = np.eye(4)
 
-    def getpose(self):
-        pose = [self.tracking_devices[key].get_T() for key in self.tracking_devices]
-        return pose
+    def get_serial(self):
+        return self.vr.getStringTrackedDeviceProperty(self.index, openvr.Prop_SerialNumber_String)
 
-    def read(self):
-        poses = self.getpose()
-        xyzs = [pose[:3, 3] for pose in poses]
-        quats = [Rot.from_matrix(pose[:3, :3]).as_quat() for pose in poses]
-        receive_time = time.time() * 1000
-        return {'xyz': np.array(xyzs), 'quat': np.array(quats), 'timestamp_ms': receive_time}
+    def get_model(self):
+        return self.vr.getStringTrackedDeviceProperty(self.index, openvr.Prop_ModelNumber_String)
+
+    def get_battery_percent(self):
+        return self.vr.getFloatTrackedDeviceProperty(self.index, openvr.Prop_DeviceBatteryPercentage_Float)
+
+    def is_charging(self):
+        return self.vr.getBoolTrackedDeviceProperty(self.index, openvr.Prop_DeviceIsCharging_Bool)
+
+    def get_T(self, pose=None):
+        pose_mat = self.get_pose_matrix()
+        if pose_mat:
+            np_pose_mat = np.array(pose_mat)['m']
+            self.T[:3, :] = np_pose_mat
+        return self.T
+
+    def get_pose_matrix(self, pose=None):
+        if pose is None:
+            pose = get_pose(self.vr)
+        if pose[self.index].bPoseIsValid:
+            return pose[self.index].mDeviceToAbsoluteTracking
+        else:
+            return None
 
 
 class ViveTrackerModule:
-    def __init__(self, configfile_path=None):
+    def __init__(self):
         self.vr = openvr.init(openvr.VRApplication_Other)
         self.vrsystem = openvr.VRSystem()
         self.object_names = {"Tracking Reference": [], "HMD": [], "Controller": [], "Tracker": []}
@@ -40,11 +55,13 @@ class ViveTrackerModule:
     def __del__(self):
         openvr.shutdown()
 
-    def return_selected_devices(self, device_keys: list):
-        selected_devices = {}
+    def return_selected_devices(self, device_keys:List[str]) -> List[VRTrackedDevice]:
+        selected_devices = []
         for key in device_keys:
             if key in self.devices:
-                selected_devices[key] = self.devices[key]
+                selected_devices.append(self.devices[key])
+            else:
+                raise ValueError(f"Device {key} not found")
         return selected_devices
 
     def get_pose(self):
@@ -65,22 +82,22 @@ class ViveTrackerModule:
         if device_class == openvr.TrackedDeviceClass_Controller:
             device_name = "controller_" + str(len(self.object_names["Controller"]) + 1)
             self.object_names["Controller"].append(device_name)
-            self.devices[device_name] = vr_tracked_device(self.vr, i, "Controller")
+            self.devices[device_name] = VRTrackedDevice(self.vr, i, "Controller")
             self.device_index_map[i] = device_name
         elif device_class == openvr.TrackedDeviceClass_HMD:
             device_name = "hmd_" + str(len(self.object_names["HMD"]) + 1)
             self.object_names["HMD"].append(device_name)
-            self.devices[device_name] = vr_tracked_device(self.vr, i, "HMD")
+            self.devices[device_name] = VRTrackedDevice(self.vr, i, "HMD")
             self.device_index_map[i] = device_name
         elif device_class == openvr.TrackedDeviceClass_GenericTracker:
             device_name = "tracker_" + str(len(self.object_names["Tracker"]) + 1)
             self.object_names["Tracker"].append(device_name)
-            self.devices[device_name] = vr_tracked_device(self.vr, i, "Tracker")
+            self.devices[device_name] = VRTrackedDevice(self.vr, i, "Tracker")
             self.device_index_map[i] = device_name
         elif device_class == openvr.TrackedDeviceClass_TrackingReference:
             device_name = "tracking_reference_" + str(len(self.object_names["Tracking Reference"]) + 1)
             self.object_names["Tracking Reference"].append(device_name)
-            self.devices[device_name] = vr_tracking_reference(self.vr, i, "Tracking Reference")
+            self.devices[device_name] = VRTrackingReference(self.vr, i, "Tracking Reference")
             self.device_index_map[i] = device_name
 
     def remove_tracked_device(self, tracked_device_index):
@@ -118,42 +135,25 @@ def get_pose(vr_obj):
     return vr_obj.getDeviceToAbsoluteTrackingPose(openvr.TrackingUniverseStanding, 0, openvr.k_unMaxTrackedDeviceCount)
 
 
-class vr_tracked_device:
-    def __init__(self, vr_obj, index, device_class):
-        self.device_class = device_class
-        self.index = index
-        self.vr = vr_obj
-        self.T = np.eye(4)
-
-    def get_serial(self):
-        return self.vr.getStringTrackedDeviceProperty(self.index, openvr.Prop_SerialNumber_String)
-
-    def get_model(self):
-        return self.vr.getStringTrackedDeviceProperty(self.index, openvr.Prop_ModelNumber_String)
-
-    def get_battery_percent(self):
-        return self.vr.getFloatTrackedDeviceProperty(self.index, openvr.Prop_DeviceBatteryPercentage_Float)
-
-    def is_charging(self):
-        return self.vr.getBoolTrackedDeviceProperty(self.index, openvr.Prop_DeviceIsCharging_Bool)
-
-    def get_T(self, pose=None):
-        pose_mat = self.get_pose_matrix()
-        if pose_mat:
-            np_pose_mat = np.array(pose_mat)['m']
-            self.T[:3, :] = np_pose_mat
-        return self.T
-
-    def get_pose_matrix(self, pose=None):
-        if pose is None:
-            pose = get_pose(self.vr)
-        if pose[self.index].bPoseIsValid:
-            return pose[self.index].mDeviceToAbsoluteTracking
-        else:
-            return None
-
-
-class vr_tracking_reference(vr_tracked_device):
+class VRTrackingReference(VRTrackedDevice):
     def get_mode(self):
         return self.vr.getStringTrackedDeviceProperty(self.index, openvr.Prop_ModeLabel_String).decode('utf-8').upper()
 
+
+class ViveTrackerUpdater:
+    def __init__(self, names:List[str]=["tracker_1", "tracker_2"]):
+        self.vive_tracker_module = ViveTrackerModule()
+        self.vive_tracker_module.print_discovered_objects()
+        self.device_key = names
+        self.tracking_devices = self.vive_tracker_module.return_selected_devices(self.device_key)
+
+    def getpose(self):
+        pose = [self.tracking_devices[key].get_T() for key in self.tracking_devices]
+        return pose
+
+    def read(self):
+        poses = self.getpose()
+        xyzs = [pose[:3, 3] for pose in poses]
+        quats = [Rot.from_matrix(pose[:3, :3]).as_quat() for pose in poses]
+        receive_time = time.time() * 1000
+        return {'xyz': np.array(xyzs), 'quat': np.array(quats), 'timestamp_ms': receive_time}

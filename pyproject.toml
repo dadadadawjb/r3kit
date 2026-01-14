@@ -45,6 +45,9 @@ rs = [
 xr = [
   "pyopenxr",
 ]
+vr = [
+  "openvr",
+]
 xense = [
   "xensesdk",
   "xensegripper",
