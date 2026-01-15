@@ -39,6 +39,14 @@ robot = Rizon()
 joints = robot.joint_read()
 ```
 
+#### Gripper
+```python
+from r3kit.devices.gripper.xense.xense import Xense # more similar alternatives can be found
+
+gripper = Xense()
+width = gripper.read()
+```
+
 #### Camera
 ```python
 from r3kit.devices.camera.realsense.general import RealSenseCamera
@@ -49,7 +57,7 @@ data = camera.get()
 
 #### Tracker
 ```python
-from r3kit.devices.tracker.vive.ultimate import Ultimate
+from r3kit.devices.tracker.vive.ultimate import Ultimate # more similar alternatives can be found
 
 tracker = Ultimate()
 data = tracker.get()

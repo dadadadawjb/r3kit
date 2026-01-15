@@ -12,9 +12,9 @@ class ArgumentParser(Tap):
     robot_id: str = 'Rizon4s-063231'
     gripper_id: str = '5e77ff097831'
     mode: str = 'joint'     # 'joint' or 'tcp'
-    urdf_path: str = './urdf/rizon4s.urdf'
-    end_link: str = 'flange'
-    base_link: str = 'link0'
+    urdf_path: str = './urdf/rizon4s.urdf'  # only used if mode is 'tcp'
+    end_link: str = 'flange'                # only used if mode is 'tcp'
+    base_link: str = 'link0'                # only used if mode is 'tcp'
     shm_name: str = 'Angler'
 
 

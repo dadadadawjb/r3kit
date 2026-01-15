@@ -1,20 +1,29 @@
 from typing import List, Dict, Union, Optional
 import time
+import gc
+from rich import print
 import numpy as np
 from scipy.spatial.transform import Rotation as Rot
+from threading import Thread, Lock, Event
+from multiprocessing import shared_memory, Manager
+from copy import deepcopy
+from functools import partial
 import flexivrdk
 assert flexivrdk.__version__ == '1.8.0', "Only support Flexiv RDK v1.8.0, current version is {flexivrdk.__version__}"
 
 from r3kit.devices.robot.base import RobotBase
 from r3kit.devices.robot.flexiv.config import *
 from r3kit.utils.transformation import xyzquat2mat, mat2xyzquat, delta_xyz, delta_quat
+from r3kit.utils.vis import draw_time, draw_items
+from r3kit import DEBUG, INFO
 
 
 class Rizon(RobotBase):
     DOF:int = 7
 
-    def __init__(self, id:str=RIZON_ID, gripper:bool=True, name:str='Rizon', tool_name:str='Flange') -> None:
+    def __init__(self, id:str=RIZON_ID, fps:int=RIZON_FPS, gripper:bool=True, tool_name:str='Flange', name:str='Rizon') -> None:
         super().__init__(name)
+        self._fps = fps
 
         self.robot = flexivrdk.Robot(id)
         if self.robot.fault():
@@ -33,7 +42,8 @@ class Rizon(RobotBase):
             tool.Switch(tool_name)
         else:
             raise RuntimeError(f"{tool_name} tool not found")
-        print(f"{tool_name} tool switched")
+        if INFO:
+            print(f"[INFO-r3kit] {tool_name} tool switched")
         self.motion_mode('primitive')
         self.block(True)
         info = self.robot.info()
@@ -45,6 +55,15 @@ class Rizon(RobotBase):
             self._gripper_limits = (0, float(info.max_width))
         else:
             self.gripper = None
+        
+        # config
+        self.joints_dtype = np.dtype(np.float64)
+        self.joints_shape = (self.DOF,)
+        self.pose_dtype = np.dtype(np.float64)
+        self.pose_shape = (4, 4)
+
+        # stream
+        self.in_streaming = Event()
     
     def __del__(self) -> None:
         if hasattr(self, 'robot') and self.robot is not None:
@@ -91,6 +110,22 @@ class Rizon(RobotBase):
             self.tcp_move(RIZON_HOME_POSE)
         else:
             raise ValueError(f"Invalid motion mode: {self.mode}")
+    
+    def _read(self) -> Dict[str, Union[float, np.ndarray]]:
+        data = self.robot.states()
+        receive_time = time.time() * 1000
+        joints = np.array(data.q, dtype=np.float64)
+        vec = np.array(data.tcp_pose, dtype=np.float64)
+        xyz = vec[:3]
+        quat = vec[3:]                                          # (w, x, y, z)
+        quat = np.array([quat[1], quat[2], quat[3], quat[0]])   # (x, y, z, w)
+        pose = xyzquat2mat(xyz, quat)
+        result = {
+            'joints': joints,
+            'pose': pose,
+            'timestamp_ms': receive_time
+        }
+        return result
     
     def joint_read(self) -> np.ndarray:
         '''
@@ -224,6 +259,198 @@ class Rizon(RobotBase):
                 pass
         else:
             raise ValueError(f"Invalid motion mode: {self.mode}")
+    
+    def start_streaming(self, callback:Optional[callable]=None, **kwargs) -> None:
+        if not hasattr(self, "_collect_streaming_data"):
+            self._collect_streaming_data = True
+        if not hasattr(self, "_shm"):
+            self._shm = None
+        
+        self.in_streaming.set()
+        if self._shm is None:
+            if callback is None:
+                self.streaming_mutex = Lock()
+                self.streaming_data = {
+                    "joints": [], 
+                    "pose": [], 
+                    "timestamp_ms": []
+                }
+            else:
+                pass
+        else:
+            if callback is None:
+                self.streaming_manager = Manager()
+                self.streaming_lock = self.streaming_manager.Lock()
+                joints_memory_size = self.joints_dtype.itemsize * np.prod(self.joints_shape).item()
+                pose_memory_size = self.pose_dtype.itemsize * np.prod(self.pose_shape).item()
+                timestamp_memory_size = np.dtype(np.float64).itemsize
+                streaming_memory_size = joints_memory_size + pose_memory_size + timestamp_memory_size
+                self.streaming_memory = shared_memory.SharedMemory(name=self._shm, create=True, size=streaming_memory_size)
+                self.streaming_array = {
+                    "joints": np.ndarray(self.joints_shape, dtype=self.joints_dtype, buffer=self.streaming_memory.buf[0:joints_memory_size]), 
+                    "pose": np.ndarray(self.pose_shape, dtype=self.pose_dtype, buffer=self.streaming_memory.buf[joints_memory_size:joints_memory_size+pose_memory_size]),
+                    "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.streaming_memory.buf[joints_memory_size+pose_memory_size:])
+                }
+                self.streaming_array_meta = {
+                    "joints": (self.joints_shape, self.joints_dtype.name, (0, joints_memory_size)), 
+                    "pose": (self.pose_shape, self.pose_dtype.name, (joints_memory_size, joints_memory_size+pose_memory_size)),
+                    "timestamp_ms": ((1,), np.float64.__name__, (joints_memory_size+pose_memory_size, streaming_memory_size))
+                }
+                self._save_streaming_meta(self.streaming_array_meta)
+            else:
+                pass
+        self.thread = Thread(target=partial(self._streaming_data, callback=callback), daemon=True)
+        self.thread.start()
+    
+    def stop_streaming(self) -> Dict[str, Union[List[np.ndarray], List[float]]]:
+        self.in_streaming.clear()
+        self.thread.join()
+        if hasattr(self, "streaming_data"):
+            streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} stop_streaming data size: {len(streaming_data['timestamp_ms'])}")
+            self.streaming_data = {
+                "joints": [], 
+                "pose": [], 
+                "timestamp_ms": []
+            }
+            del self.streaming_data
+            del self.streaming_mutex
+        elif hasattr(self, "streaming_array"):
+            streaming_data = {
+                "joints": [np.copy(self.streaming_array["joints"])], 
+                "pose": [np.copy(self.streaming_array["pose"])], 
+                "timestamp_ms": [self.streaming_array["timestamp_ms"].item()]
+            }
+            self.streaming_memory.close()
+            self.streaming_memory.unlink()
+            del self.streaming_memory
+            del self.streaming_array, self.streaming_array_meta
+            del self.streaming_manager
+            del self.streaming_lock
+        else:
+            raise AttributeError
+        return streaming_data
+    
+    def save_streaming(self, save_path:str, streaming_data:dict) -> None:
+        np.save(os.path.join(save_path, "timestamps.npy"), np.array(streaming_data["timestamp_ms"], dtype=float))
+        if len(streaming_data["timestamp_ms"]) > 1:
+            freq = len(streaming_data["timestamp_ms"]) / (streaming_data["timestamp_ms"][-1] - streaming_data["timestamp_ms"][0])
+            if INFO:
+                draw_time(streaming_data["timestamp_ms"], os.path.join(save_path, f"freq_{freq}.png"))
+            else:
+                np.savetxt(os.path.join(save_path, f"freq_{freq}.txt"), np.array([]))
+        else:
+            freq = 0
+        np.save(os.path.join(save_path, "joints.npy"), np.array(streaming_data["joints"], dtype=float))
+        np.save(os.path.join(save_path, "pose.npy"), np.array(streaming_data["pose"], dtype=float))
+        if INFO:
+            draw_items(np.array(streaming_data["joints"], dtype=float), os.path.join(save_path, "joints.png"))
+    
+    def collect_streaming(self, collect:bool=True) -> None:
+        self._collect_streaming_data = collect
+    
+    def shm_streaming(self, shm:Optional[str]=None) -> None:
+        # NOTE: only valid for non-custom-callback
+        assert (not self.in_streaming.is_set()) or (not self._collect_streaming_data)
+        self._shm = shm
+    
+    def get_streaming(self) -> Dict[str, Union[List[np.ndarray], List[float]]]:
+        # NOTE: only valid for non-custom-callback
+        assert not self._collect_streaming_data
+        if hasattr(self, "streaming_data"):
+            streaming_data = self.streaming_data
+            if INFO:
+                print(f"[INFO-r3kit] {self.name} get_streaming data size: {len(streaming_data['timestamp_ms'])}")
+        elif hasattr(self, "streaming_array"):
+            streaming_data = {
+                "joints": [np.copy(self.streaming_array["joints"])], 
+                "pose": [np.copy(self.streaming_array["pose"])], 
+                "timestamp_ms": [self.streaming_array["timestamp_ms"].item()]
+            }
+        else:
+            raise AttributeError
+        return streaming_data
+    
+    def reset_streaming(self, **kwargs) -> None:
+        # NOTE: only valid for non-custom-callback
+        assert not self._collect_streaming_data
+        if hasattr(self, "streaming_data"):
+            self.streaming_data['joints'].clear()
+            self.streaming_data['pose'].clear()
+            self.streaming_data['timestamp_ms'].clear()
+            del self.streaming_data
+            del self.streaming_mutex
+            gc.collect()
+        elif hasattr(self, "streaming_array"):
+            self.streaming_memory.close()
+            self.streaming_memory.unlink()
+            del self.streaming_memory
+            del self.streaming_array, self.streaming_array_meta
+            del self.streaming_manager
+            del self.streaming_lock
+        else:
+            raise AttributeError
+        
+        if self._shm is None:
+            self.streaming_mutex = Lock()
+            self.streaming_data = {
+                "joints": [], 
+                "pose": [], 
+                "timestamp_ms": []
+            }
+        else:
+            self.streaming_manager = Manager()
+            self.streaming_lock = self.streaming_manager.Lock()
+            joints_memory_size = self.joints_dtype.itemsize * np.prod(self.joints_shape).item()
+            pose_memory_size = self.pose_dtype.itemsize * np.prod(self.pose_shape).item()
+            timestamp_memory_size = np.dtype(np.float64).itemsize
+            streaming_memory_size = joints_memory_size + pose_memory_size + timestamp_memory_size
+            self.streaming_memory = shared_memory.SharedMemory(name=self._shm, create=True, size=streaming_memory_size)
+            self.streaming_array = {
+                "joints": np.ndarray(self.joints_shape, dtype=self.joints_dtype, buffer=self.streaming_memory.buf[0:joints_memory_size]), 
+                "pose": np.ndarray(self.pose_shape, dtype=self.pose_dtype, buffer=self.streaming_memory.buf[joints_memory_size:joints_memory_size+pose_memory_size]),
+                "timestamp_ms": np.ndarray((1,), dtype=np.float64, buffer=self.streaming_memory.buf[joints_memory_size+pose_memory_size:])
+            }
+            self.streaming_array_meta = {
+                "joints": (self.joints_shape, self.joints_dtype.name, (0, joints_memory_size)), 
+                "pose": (self.pose_shape, self.pose_dtype.name, (joints_memory_size, joints_memory_size+pose_memory_size)),
+                "timestamp_ms": ((1,), np.float64.__name__, (joints_memory_size+pose_memory_size, streaming_memory_size))
+            }
+            self._save_streaming_meta(self.streaming_array_meta)
+    
+    def _streaming_data(self, callback:Optional[callable]=None):
+        DT = 1.0 / self._fps
+        while self.in_streaming.is_set():
+            t_start = time.perf_counter()
+
+            # get data
+            if not self._collect_streaming_data:
+                continue
+
+            data = self._read()
+            
+            if callback is None:
+                if hasattr(self, "streaming_data"):
+                    self.streaming_mutex.acquire()
+                    self.streaming_data['joints'].append(data['joints'])
+                    self.streaming_data['pose'].append(data['pose'])
+                    self.streaming_data['timestamp_ms'].append(data['timestamp_ms'])
+                    self.streaming_mutex.release()
+                elif hasattr(self, "streaming_array"):
+                    with self.streaming_lock:
+                        self.streaming_array["joints"][:] = data['joints'][:]
+                        self.streaming_array["pose"][:] = data['pose'][:]
+                        self.streaming_array["timestamp_ms"][:] = data['timestamp_ms']
+                else:
+                    raise AttributeError
+            else:
+                callback(deepcopy(data))
+            
+            elapsed = time.perf_counter() - t_start
+            sleep_time = DT - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
     
     def zero_ft(self) -> None:
         '''
