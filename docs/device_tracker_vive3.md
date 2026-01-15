@@ -5,4 +5,4 @@ To change the action rule, `Manage trackers` in `SteamVR`.
 
 ## Coordinate
 * Shared tracking map: unknown
-* Tracker self: unknown
+* Tracker self: (x=left, y=up, z=in)

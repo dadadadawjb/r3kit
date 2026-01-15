@@ -40,6 +40,7 @@ class VIVE3(TrackerBase):
         self.in_streaming = Event()
 
     def _read(self) -> Dict[str, Union[np.ndarray, float]]:
+        # VIVE to base
         xyzs = []
         quats = []
         receive_times = []
@@ -262,9 +263,9 @@ class VIVE3(TrackerBase):
 
 if __name__ == "__main__":
     import tqdm
-    tracker = VIVE3(id=['left_foot'], name='VIVE3')
-    streaming = True
-    shm = True
+    tracker = VIVE3(id=['chest'], name='VIVE3')
+    streaming = False
+    shm = False
 
     if not streaming:
         np.set_printoptions(precision=3, floatmode='fixed', suppress=True)
