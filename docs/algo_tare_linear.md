@@ -8,3 +8,6 @@ where $\mathbf{R}$ represents the rotation matrix from ftsensor coordinate to gr
 What we can measure/know include $\mathbf{R}$ and $\mathbf{f}$ and $\mathbf{t}$ and $\mathbf{g}$.
 So we can use least squares method to calculate $m$ and $\mathbf{f}_0$ from the first equation. Or measure the $m$ also to calculate $\mathbf{f}_0$ from the first equation. And then calculate $\mathbf{c}$ and $\mathbf{t}_0$ from the second equation.
 Notice that the second equation cannot be directly solved by least squares method if $m$ unknown since nonlinear.
+
+Even when we cannot know the gravity coordinate, e.g., $\mathbf{R}$ represents the rotation matrix from ftsensor coordinate to some fixed coordinate and $\mathbf{g}$ represents the gravitational acceleration in that fixed coordinate, these two equations still hold. Then what we can measure/know include $\mathbf{R}$ and $\mathbf{f}$ and $\mathbf{t}$.
+So we can use least squares method to calculate $\mathbf{k}=m\mathbf{g}$ and $\mathbf{f}_0$ from the first equation. And then calculate $\mathbf{c}$ and $\mathbf{t}_0$ from the second equation.
