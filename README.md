@@ -143,6 +143,7 @@ from r3kit.algos.tare.linear import LinearMFTarer # more similar alternatives ca
 tarer = LinearMFTarer()
 tarer.add_data(f, pose)
 tare = tarer.run()
+tare_f = tarer.raw2tare(raw_f, pose)
 ```
 
 ### Utilities
